@@ -590,3 +590,4 @@ def test_github_actions_yaml_is_reproducible() -> None:
     assert "python -m yamllint ." in rendered
     assert "python -m pytest -q" in rendered
     assert "git diff --check" in rendered
+    assert "cache-dependency-path: requirements-dev.txt" in rendered
