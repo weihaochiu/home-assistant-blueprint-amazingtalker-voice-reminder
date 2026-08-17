@@ -1,0 +1,775 @@
+blueprint:
+  name: AmazingTalker 多學員課程語音提醒
+  description: >-
+    AmazingTalker Multi-Learner Voice Reminder。從多個 Remote Calendar 行事曆讀取課程，
+    提供每日摘要、可自訂課前提醒、取消/改期前重新確認、多播放器播報與個別音量恢復。
+    本專案非 AmazingTalker 官方專案。AmazingTalker ICS URL 是私人讀取金鑰，請勿公開。
+  domain: automation
+  author: weihaochiu
+  source_url: >-
+    https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-reminder/blob/main/blueprints/automation/weihaochiu/amazingtalker_voice_reminder.yaml
+  homeassistant:
+    min_version: 2025.7.0
+  input:
+    learners_section:
+      name: 學員行事曆
+      icon: mdi:calendar-account
+      description: >-
+        每位學員需先建立一個 Remote Calendar。至少新增一筆。ICS URL 是私人讀取金鑰，
+        不可貼到 GitHub、Issue 或公開論壇。
+      input:
+        learners:
+          name: 學員
+          description: >-
+            可新增任意數量。播報名稱空白時依序使用行事曆 friendly_name、
+            最後使用不含 calendar. 前綴的 entity ID。
+          selector:
+            object:
+              multiple: true
+              label_field: spoken_name
+              description_field: calendar_entity
+              fields:
+                calendar_entity:
+                  label: AmazingTalker 行事曆
+                  required: true
+                  selector:
+                    entity:
+                      filter:
+                        - domain: calendar
+                spoken_name:
+                  label: TTS 播報名稱（選填）
+                  selector:
+                    text:
+
+    playback_section:
+      name: TTS 與播放器
+      icon: mdi:account-voice
+      input:
+        media_players:
+          name: 播放器
+          description: 至少選擇一個 media_player；每台會獨立播放及處理失敗。
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: media_player
+        tts_entity:
+          name: TTS 實體
+          description: 第一個驗證目標為 Google Translate TTS。
+          selector:
+            entity:
+              filter:
+                - domain: tts
+        tts_language:
+          name: TTS 語言
+          default: zh-tw
+          selector:
+            text:
+        announcement_volume:
+          name: 播報音量
+          default: 0.8
+          selector:
+            number:
+              min: 0
+              max: 1
+              step: 0.05
+              mode: slider
+        restore_original_volume:
+          name: 恢復各播放器原音量
+          description: >-
+            播放前分別記錄音量，並在估算語音結束及播放器狀態穩定後逐台恢復。
+            播放器未提供 volume_level 時會安全跳過；完成判定為 best effort。
+          default: true
+          selector:
+            boolean:
+        attempt_media_resume:
+          name: 嘗試恢復原本媒體
+          description: >-
+            開啟時傳送 announce: true，關閉時傳送 announce: false。此功能依播放器與整合
+            支援程度而定，不保證能恢復原本歌曲、播放進度或佇列。Music Assistant 及支援
+            Announcement 的播放器成功率較高；HomePod 原生播放、Siri 或 iPhone 直接
+            AirPlay 的內容可能無法恢復。
+          default: false
+          selector:
+            boolean:
+
+    scheduled_update_section:
+      name: 定期強制更新
+      icon: mdi:calendar-sync
+      collapsed: true
+      description: >-
+        這是 Blueprint 額外執行的強制更新，無法降低 Remote Calendar 本身的內建更新頻率。
+      input:
+        enable_scheduled_update:
+          name: 啟用定期強制更新
+          default: true
+          selector:
+            boolean:
+        update_frequency:
+          name: 更新頻率
+          default: daily
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: 每天
+                  value: daily
+                - label: 每週
+                  value: weekly
+                - label: 每月
+                  value: monthly
+        update_time:
+          name: 更新時間
+          default: "07:00:00"
+          selector:
+            time:
+        update_weekday:
+          name: 每週更新星期
+          description: 只在 weekly 使用；Home Assistant 不會依頻率動態隱藏此欄位。
+          default: monday
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: 星期一
+                  value: monday
+                - label: 星期二
+                  value: tuesday
+                - label: 星期三
+                  value: wednesday
+                - label: 星期四
+                  value: thursday
+                - label: 星期五
+                  value: friday
+                - label: 星期六
+                  value: saturday
+                - label: 星期日
+                  value: sunday
+        update_month_day:
+          name: 每月更新日期
+          description: >-
+            只在 monthly 使用；其他頻率忽略且欄位不會動態隱藏。若當月沒有指定日期，
+            改在當月最後一天更新。
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 31
+              step: 1
+              mode: box
+
+    morning_section:
+      name: 當天早晨課程播報
+      icon: mdi:weather-sunset-up
+      collapsed: true
+      input:
+        enable_morning_summary:
+          name: 啟用早晨摘要
+          default: true
+          selector:
+            boolean:
+        morning_summary_time:
+          name: 早晨摘要時間
+          description: 關閉早晨摘要時忽略。
+          default: "07:12:00"
+          selector:
+            time:
+
+    reminder_section:
+      name: 課前提醒與重新同步
+      icon: mdi:bell-ring
+      collapsed: true
+      input:
+        enable_pre_class_reminders:
+          name: 啟用課前提醒
+          default: true
+          selector:
+            boolean:
+        reminder_offsets:
+          name: 課前提醒段數
+          description: >-
+            可新增任意段數，每筆為課程開始前分鐘數，建議 1～1440。執行時會轉整數、
+            移除無效/零/負數/重複值並由大到小排序，不會改寫 UI 儲存值。
+          default:
+            - minutes_before: 30
+            - minutes_before: 10
+          selector:
+            object:
+              multiple: true
+              label_field: minutes_before
+              fields:
+                minutes_before:
+                  label: 課程開始前分鐘數
+                  required: true
+                  selector:
+                    number:
+                      min: 1
+                      max: 1440
+                      step: 1
+                      mode: box
+        enable_pre_class_refresh:
+          name: 啟用課前重新同步
+          default: true
+          selector:
+            boolean:
+        pre_class_refresh_minutes:
+          name: 課前重新同步分鐘數
+          description: 從現有快取發現即將於此分鐘數後開始的課程時，只更新相關行事曆。
+          default: 60
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              mode: box
+        verify_before_each_reminder:
+          name: 每段提醒前最後確認
+          description: >-
+            播放前更新相關行事曆並依 UID（或 entity/start/end/summary）確認。更新失敗時
+            fail-closed 跳過該行事曆的提醒。
+          default: true
+          selector:
+            boolean:
+
+# parallel 讓上一分鐘的 TTS 等待不會阻塞下一次 heartbeat。queued 會讓舊執行延後後
+# 以過時工作排隊；single 會漏掉 heartbeat。每次執行固定 check_time，避免舊執行重算 now()。
+mode: parallel
+max: 10
+max_exceeded: warning
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+    id: heartbeat
+  - trigger: time
+    at: !input update_time
+    id: scheduled_update
+  - trigger: time
+    at: !input morning_summary_time
+    id: morning_summary
+
+variables:
+  learners_input: !input learners
+  media_players_input: !input media_players
+  tts_entity_input: !input tts_entity
+  tts_language_input: !input tts_language
+  announcement_volume_input: !input announcement_volume
+  restore_original_volume_input: !input restore_original_volume
+  attempt_media_resume_input: !input attempt_media_resume
+  enable_scheduled_update_input: !input enable_scheduled_update
+  update_frequency_input: !input update_frequency
+  update_weekday_input: !input update_weekday
+  update_month_day_input: !input update_month_day
+  enable_morning_summary_input: !input enable_morning_summary
+  enable_pre_class_reminders_input: !input enable_pre_class_reminders
+  reminder_offsets_input: !input reminder_offsets
+  enable_pre_class_refresh_input: !input enable_pre_class_refresh
+  pre_class_refresh_minutes_input: !input pre_class_refresh_minutes
+  verify_before_each_reminder_input: !input verify_before_each_reminder
+  # Numeric timestamps survive Home Assistant's cross-action template serialization.
+  check_time: "{{ as_timestamp(now()) }}"
+  check_minute: "{{ ((check_time | float(0)) // 60 * 60) | int }}"
+  calendar_entities: >-
+    {% set ns = namespace(items=[]) %}
+    {% for learner in learners_input if learner is mapping %}
+      {% set entity = learner.get('calendar_entity', '') | string | trim %}
+      {% if entity.startswith('calendar.') and entity not in ns.items %}
+        {% set ns.items = ns.items + [entity] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items }}
+  normalized_offsets: >-
+    {% set ns = namespace(items=[]) %}
+    {% for raw in reminder_offsets_input if raw is mapping %}
+      {% set value = raw.get('minutes_before', 0) | int(0) %}
+      {% if value > 0 and value not in ns.items %}
+        {% set ns.items = ns.items + [value] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items | sort(reverse=true) }}
+
+conditions:
+  - alias: 至少有一個有效的 calendar entity
+    condition: template
+    value_template: "{{ calendar_entities | count > 0 }}"
+
+actions:
+  - choose:
+      - alias: 定期強制更新分支
+        conditions:
+          - condition: trigger
+            id: scheduled_update
+          - condition: template
+            value_template: "{{ enable_scheduled_update_input }}"
+          - alias: 符合每日、每週或月底 fallback 規則
+            condition: template
+            value_template: >-
+              {% set weekdays = {
+                'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+              } %}
+              {% set run_time = as_local(as_datetime(check_time | float(0))) %}
+              {% set next_month = (run_time.replace(day=28) + timedelta(days=4)).replace(day=1) %}
+              {% set last_day = (next_month - timedelta(days=1)).day %}
+              {% set target_day = [update_month_day_input | int(1), last_day] | min %}
+              {{ update_frequency_input == 'daily'
+                 or (update_frequency_input == 'weekly'
+                     and run_time.weekday() == weekdays.get(update_weekday_input, 0))
+                 or (update_frequency_input == 'monthly'
+                     and run_time.day == target_day) }}
+        sequence:
+          - alias: 一次強制更新所有選取的行事曆
+            action: homeassistant.update_entity
+            target:
+              entity_id: "{{ calendar_entities }}"
+            continue_on_error: true
+
+      - alias: 早晨摘要分支
+        conditions:
+          - condition: trigger
+            id: morning_summary
+          - condition: template
+            value_template: "{{ enable_morning_summary_input }}"
+        sequence:
+          - variables:
+              available_calendars: >-
+                {{ calendar_entities
+                   | reject('is_state', 'unavailable')
+                   | reject('is_state', 'unknown') | list }}
+          - alias: 沒有可查詢行事曆時安全結束
+            condition: template
+            value_template: "{{ available_calendars | count > 0 }}"
+          - alias: 從本地午夜查詢到隔日本地午夜（只讀 coordinator 快取）
+            action: calendar.get_events
+            target:
+              entity_id: "{{ available_calendars }}"
+            data:
+              start_date_time: >-
+                {{ as_local(as_datetime(check_time | float(0)))
+                   .replace(hour=0, minute=0, second=0, microsecond=0) }}
+              end_date_time: >-
+                {{ as_local(as_datetime(check_time | float(0)))
+                   .replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1) }}
+            response_variable: morning_agenda
+            continue_on_error: true
+          - variables:
+              morning_message: >-
+                {# 建立已排序 timed events；日期型 start 是全天事件，直接忽略。 #}
+                {% set ns = namespace(events=[]) %}
+                {% if morning_agenda is defined %}
+                  {% for learner in learners_input if learner is mapping %}
+                    {% set entity = learner.get('calendar_entity', '') | string | trim %}
+                    {% set requested = learner.get('spoken_name', '') | string | trim %}
+                    {% set fallback = state_attr(entity, 'friendly_name') %}
+                    {% set name = requested if requested else
+                      (fallback if fallback else entity.split('.', 1)[-1]) %}
+                    {% for event in morning_agenda.get(entity, {}).get('events', []) %}
+                      {% set raw_start = event.get('start', '') | string %}
+                      {% if 'T' in raw_start or ' ' in raw_start %}
+                        {% set start = as_local(as_datetime(raw_start)) %}
+                        {% set ns.events = ns.events + [{
+                          'learner': name | string,
+                          'start': start,
+                          'sort_key': start.strftime('%Y%m%d%H%M') ~ '|' ~ (name | string)
+                        }] %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endfor %}
+                {% endif %}
+                {% set events = ns.events | sort(attribute='sort_key') %}
+                {% if events | count > 0 %}
+                  {% set order = namespace(names=[]) %}
+                  {% for event in events %}
+                    {% if event.learner not in order.names %}
+                      {% set order.names = order.names + [event.learner] %}
+                    {% endif %}
+                  {% endfor %}
+                  {% macro spoken_time(dt) -%}
+                    {%- set hour = dt.hour -%}
+                    {%- set minute = dt.minute -%}
+                    {%- if hour == 0 -%}{% set period = '凌晨' %}{% set h = 12 %}
+                    {%- elif hour < 6 -%}{% set period = '凌晨' %}{% set h = hour %}
+                    {%- elif hour < 12 -%}{% set period = '早上' %}{% set h = hour %}
+                    {%- elif hour == 12 -%}{% set period = '中午' %}{% set h = 12 %}
+                    {%- elif hour < 18 -%}{% set period = '下午' %}{% set h = hour - 12 %}
+                    {%- else -%}{% set period = '晚上' %}{% set h = hour - 12 %}
+                    {%- endif -%}
+                    {{- period ~ h ~ '點' ~ (minute ~ '分' if minute else '') -}}
+                  {%- endmacro %}
+                  早安提醒，今天有 AmazingTalker 課程。
+                  {%- for name in order.names %}
+                    {% set learner_events = events | selectattr('learner', 'eq', name) | list %}
+                    {{ name }} 的課程時間是
+                    {%- for event in learner_events -%}
+                      {{ spoken_time(event.start) }}{{ '、' if not loop.last else '。' }}
+                    {%- endfor %}
+                  {%- endfor %}
+                {% endif %}
+          - alias: 沒有課程時不改音量也不播放
+            condition: template
+            value_template: "{{ morning_message | trim | length > 0 }}"
+          - alias: 播放早晨摘要
+            sequence: &play_announcement
+              - variables:
+                  announcement_message: "{{ morning_message | trim }}"
+                  player_snapshots: >-
+                    {% set ns = namespace(items=[]) %}
+                    {% for player in media_players_input %}
+                      {% if states(player) not in ['unknown', 'unavailable'] %}
+                        {% set ns.items = ns.items + [{
+                          'entity_id': player,
+                          'volume': state_attr(player, 'volume_level')
+                            if restore_original_volume_input else none
+                        }] %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.items }}
+                  speech_wait_seconds: >-
+                    {{ [[((announcement_message | length) / 3) | round(0, 'ceil') | int + 6, 8] | max, 120] | min }}
+              - alias: 沒有可用播放器時安全結束並在 trace 留下此條件
+                condition: template
+                value_template: "{{ player_snapshots | count > 0 }}"
+              - alias: 分別設定每台可用播放器音量
+                repeat:
+                  for_each: "{{ player_snapshots }}"
+                  sequence:
+                    - action: media_player.volume_set
+                      target:
+                        entity_id: "{{ repeat.item.entity_id }}"
+                      data:
+                        volume_level: "{{ announcement_volume_input | float(0.8) }}"
+                      continue_on_error: true
+              - alias: 分別播放；單台失敗不阻止其他播放器
+                repeat:
+                  for_each: "{{ player_snapshots }}"
+                  sequence:
+                    - action: media_player.play_media
+                      target:
+                        entity_id: "{{ repeat.item.entity_id }}"
+                      data:
+                        media_content_id: >-
+                          {{ 'media-source://tts/' ~ tts_entity_input
+                             ~ '?message=' ~ (announcement_message | urlencode)
+                             ~ '&language=' ~ (tts_language_input | urlencode) }}
+                        media_content_type: music
+                        announce: "{{ attempt_media_resume_input }}"
+                      continue_on_error: true
+              - alias: 依訊息長度保留最低播放時間，避免 action 返回後立即降音量
+                delay:
+                  seconds: "{{ speech_wait_seconds }}"
+              - alias: 再等待狀態離開 buffering（best effort，逾時仍進入恢復）
+                wait_template: >-
+                  {{ player_snapshots
+                     | map(attribute='entity_id')
+                     | select('is_state', 'buffering') | list | count == 0 }}
+                timeout: "00:00:10"
+                continue_on_timeout: true
+              - alias: 分別恢復原始音量；沒有 volume_level 時跳過
+                repeat:
+                  for_each: "{{ player_snapshots if restore_original_volume_input else [] }}"
+                  sequence:
+                    - if:
+                        - condition: template
+                          value_template: "{{ repeat.item.volume is number }}"
+                      then:
+                        - action: media_player.volume_set
+                          target:
+                            entity_id: "{{ repeat.item.entity_id }}"
+                          data:
+                            volume_level: "{{ repeat.item.volume }}"
+                          continue_on_error: true
+
+      - alias: 每分鐘 heartbeat 課前流程
+        conditions:
+          - condition: trigger
+            id: heartbeat
+          - condition: template
+            value_template: >-
+              {{ (enable_pre_class_reminders_input and normalized_offsets | count > 0)
+                 or enable_pre_class_refresh_input }}
+        sequence:
+          - variables:
+              available_calendars: >-
+                {{ calendar_entities
+                   | reject('is_state', 'unavailable')
+                   | reject('is_state', 'unknown') | list }}
+              query_horizon_minutes: >-
+                {% set largest_offset = (normalized_offsets | max)
+                  if normalized_offsets | count > 0 else 0 %}
+                {{ [([largest_offset,
+                       pre_class_refresh_minutes_input | int(60)] | max) + 2, 2] | max }}
+          - alias: 沒有可查詢行事曆時安全結束
+            condition: template
+            value_template: "{{ available_calendars | count > 0 }}"
+          - alias: 每分鐘只讀 Remote Calendar coordinator 快取
+            action: calendar.get_events
+            target:
+              entity_id: "{{ available_calendars }}"
+            data:
+              start_date_time: "{{ as_local(as_datetime(check_minute | float(0))) }}"
+              end_date_time: >-
+                {{ as_local(as_datetime(check_minute | float(0)))
+                   + timedelta(minutes=query_horizon_minutes | int) }}
+            response_variable: heartbeat_agenda
+            continue_on_error: true
+          - variables:
+              cached_events: >-
+                {% set ns = namespace(items=[]) %}
+                {% set run_minute = as_local(as_datetime(check_minute | float(0))) %}
+                {% if heartbeat_agenda is defined %}
+                  {% for learner in learners_input if learner is mapping %}
+                    {% set entity = learner.get('calendar_entity', '') | string | trim %}
+                    {% set requested = learner.get('spoken_name', '') | string | trim %}
+                    {% set fallback = state_attr(entity, 'friendly_name') %}
+                    {% set name = requested if requested else
+                      (fallback if fallback else entity.split('.', 1)[-1]) %}
+                    {% for event in heartbeat_agenda.get(entity, {}).get('events', []) %}
+                      {% set raw_start = event.get('start', '') | string %}
+                      {% if 'T' in raw_start or ' ' in raw_start %}
+                        {% set start = as_local(as_datetime(raw_start)) %}
+                        {% set end = as_local(as_datetime(event.get('end'))) %}
+                        {% set remaining = ((start - run_minute).total_seconds() / 60) | round(0, 'floor') | int %}
+                        {# 官方 get_events 目前不輸出 UID；保留讀取以便未來相容，現行走 fallback。 #}
+                        {% set uid = event.get('uid', '') | string %}
+                        {% set identity = entity ~ '|uid|' ~ uid ~ '|' ~ raw_start if uid else
+                          entity ~ '|' ~ raw_start ~ '|' ~ (event.get('end', '') | string)
+                          ~ '|' ~ (event.get('summary', '') | string) %}
+                        {% set ns.items = ns.items + [{
+                          'calendar': entity, 'learner': name | string,
+                          'start_raw': raw_start,
+                          'end_raw': event.get('end', '') | string,
+                          'summary': event.get('summary', '') | string,
+                          'uid': uid, 'identity': identity,
+                          'remaining': remaining
+                        }] %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endfor %}
+                {% endif %}
+                {{ ns.items }}
+              refresh_calendars: >-
+                {% set target = pre_class_refresh_minutes_input | int(60) %}
+                {% set ns = namespace(items=[]) %}
+                {% if enable_pre_class_refresh_input %}
+                  {% for event in cached_events if event.remaining == target %}
+                    {% if event.calendar not in ns.items %}
+                      {% set ns.items = ns.items + [event.calendar] %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+                {{ ns.items }}
+          - variables:
+              refresh_snapshots: >-
+                {% set ns = namespace(items=[]) %}
+                {% for entity in refresh_calendars %}
+                  {% set ns.items = ns.items + [{
+                    'calendar': entity,
+                    'before': as_timestamp(states[entity].last_reported)
+                      if states[entity] is defined else none
+                  }] %}
+                {% endfor %}
+                {{ ns.items }}
+          - alias: 課前指定時間重新同步，每個目標行事曆一次
+            repeat:
+              for_each: "{{ refresh_calendars }}"
+              sequence:
+                - action: homeassistant.update_entity
+                  target:
+                    entity_id: "{{ repeat.item }}"
+                  continue_on_error: true
+                - alias: action 已等待 coordinator；再給非同步 entity state write 短暫 settle 時間
+                  delay: "00:00:02"
+          - variables:
+              refresh_successful_calendars: >-
+                {% set ns = namespace(items=[]) %}
+                {% for snapshot in refresh_snapshots %}
+                  {% set entity = snapshot.calendar %}
+                  {% if states(entity) not in ['unknown', 'unavailable']
+                        and states[entity] is defined
+                        and snapshot.before is not none
+                        and as_timestamp(states[entity].last_reported)
+                          > (snapshot.before | float(0)) %}
+                    {% set ns.items = ns.items + [entity] %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.items | unique | list }}
+          - alias: 指定時間有重新同步時，重新查詢最新 coordinator 資料
+            if:
+              - condition: template
+                value_template: "{{ refresh_calendars | count > 0 }}"
+            then:
+              - action: calendar.get_events
+                target:
+                  entity_id: "{{ available_calendars }}"
+                data:
+                  start_date_time: "{{ as_local(as_datetime(check_minute | float(0))) }}"
+                  end_date_time: >-
+                    {{ as_local(as_datetime(check_minute | float(0)))
+                       + timedelta(minutes=query_horizon_minutes | int) }}
+                response_variable: refreshed_agenda
+                continue_on_error: true
+          - variables:
+              working_events: >-
+                {% if refreshed_agenda is defined %}
+                  {% set agenda = refreshed_agenda %}
+                {% elif refresh_calendars | count > 0 %}
+                  {% set agenda = {} %}
+                {% else %}
+                  {% set agenda = heartbeat_agenda | default({}) %}
+                {% endif %}
+                {% set ns = namespace(items=[]) %}
+                {% for original in cached_events %}
+                  {% set refresh_ok = original.calendar not in refresh_calendars
+                    or original.calendar in refresh_successful_calendars %}
+                  {% for event in agenda.get(original.calendar, {}).get('events', []) if refresh_ok %}
+                    {% set raw_start = event.get('start', '') | string %}
+                    {# 若官方未提供 UID，使用完整 fallback identity。 #}
+                    {% set uid = event.get('uid', '') | string %}
+                    {% set fallback_match = not original.uid and not uid
+                      and raw_start == original.start_raw
+                      and (event.get('end', '') | string) == original.end_raw
+                      and (event.get('summary', '') | string) == original.summary %}
+                    {% if (original.uid and uid == original.uid and raw_start == original.start_raw)
+                          or fallback_match %}
+                      {% set ns.items = ns.items + [original] %}
+                    {% endif %}
+                  {% endfor %}
+                {% endfor %}
+                {{ ns.items | unique(attribute='identity') | list }}
+              reminder_candidates: >-
+                {% set ns = namespace(items=[]) %}
+                {% if enable_pre_class_reminders_input %}
+                  {% for event in working_events if event.remaining in normalized_offsets %}
+                    {% set key = event.identity ~ '|' ~ (event.remaining | string) %}
+                    {% if key not in ns.items | map(attribute='reminder_key') | list %}
+                      {% set ns.items = ns.items + [dict(event, reminder_key=key)] %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+                {{ ns.items }}
+              verify_calendars: >-
+                {% set ns = namespace(items=[]) %}
+                {% if verify_before_each_reminder_input %}
+                  {% for event in reminder_candidates %}
+                    {% if event.calendar not in ns.items %}
+                      {% set ns.items = ns.items + [event.calendar] %}
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+                {{ ns.items }}
+              verify_snapshots: >-
+                {% set ns = namespace(items=[]) %}
+                {% for entity in verify_calendars %}
+                  {% set ns.items = ns.items + [{
+                    'calendar': entity,
+                    'before': as_timestamp(states[entity].last_reported)
+                      if states[entity] is defined else none
+                  }] %}
+                {% endfor %}
+                {{ ns.items }}
+          - alias: 每段實際提醒前逐一最後更新；同一行事曆在本 heartbeat 去重
+            repeat:
+              for_each: "{{ verify_calendars }}"
+              sequence:
+                - variables:
+                    verify_entity: "{{ repeat.item }}"
+                - action: homeassistant.update_entity
+                  target:
+                    entity_id: "{{ verify_entity }}"
+                  continue_on_error: true
+                - alias: action 已等待 coordinator；短暫 settle 後仍以 last_reported 驗證成功
+                  delay: "00:00:02"
+          - alias: 最後確認刷新後重新查詢；service完成與 last_reported 共同作為成功證據
+            if:
+              - condition: template
+                value_template: "{{ verify_calendars | count > 0 }}"
+            then:
+              - variables:
+                  verified_calendar_entities: >-
+                    {% set ns = namespace(items=[]) %}
+                    {% for snapshot in verify_snapshots %}
+                      {% set entity = snapshot.calendar %}
+                      {% if states(entity) not in ['unknown', 'unavailable']
+                            and states[entity] is defined
+                            and snapshot.before is not none
+                            and as_timestamp(states[entity].last_reported)
+                              > (snapshot.before | float(0)) %}
+                        {% set ns.items = ns.items + [entity] %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.items | unique | list }}
+              - if:
+                  - condition: template
+                    value_template: "{{ verified_calendar_entities | count > 0 }}"
+                then:
+                  - action: calendar.get_events
+                    target:
+                      entity_id: "{{ verified_calendar_entities }}"
+                    data:
+                      start_date_time: "{{ as_local(as_datetime(check_minute | float(0))) }}"
+                      end_date_time: >-
+                        {{ as_local(as_datetime(check_minute | float(0)))
+                           + timedelta(minutes=query_horizon_minutes | int) }}
+                    response_variable: verified_agenda
+                    continue_on_error: true
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ verified_calendar_entities | count < verify_calendars | count }}
+                then:
+                  - alias: 更新失敗採 fail-closed；warning action 本身失敗也不阻塞 Blueprint
+                    action: system_log.write
+                    data:
+                      level: warning
+                      logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+                      message: >-
+                        AmazingTalker reminder verification failed for one or more calendars;
+                        the affected reminder was skipped (fail-closed).
+                    continue_on_error: true
+          - variables:
+              confirmed_candidates: >-
+                {% if not verify_before_each_reminder_input %}
+                  {{ reminder_candidates }}
+                {% else %}
+                  {% set ns = namespace(items=[]) %}
+                  {% if verified_agenda is defined %}
+                    {% for original in reminder_candidates
+                           if original.calendar in verified_calendar_entities | default([]) %}
+                      {% for event in verified_agenda.get(original.calendar, {}).get('events', []) %}
+                        {% set raw_start = event.get('start', '') | string %}
+                        {% set uid = event.get('uid', '') | string %}
+                        {% set fallback_match = not original.uid and not uid
+                          and raw_start == original.start_raw
+                          and (event.get('end', '') | string) == original.end_raw
+                          and (event.get('summary', '') | string) == original.summary %}
+                        {% if (original.uid and uid == original.uid and raw_start == original.start_raw)
+                              or fallback_match %}
+                          {% set ns.items = ns.items + [original] %}
+                        {% endif %}
+                      {% endfor %}
+                    {% endfor %}
+                  {% endif %}
+                  {{ ns.items | unique(attribute='reminder_key') | list }}
+                {% endif %}
+              reminder_message: >-
+                {% set offsets = confirmed_candidates | map(attribute='remaining') | unique | sort(reverse=true) | list %}
+                {% for offset in offsets %}
+                  {% set group = confirmed_candidates | selectattr('remaining', 'eq', offset) | list %}
+                  {% set names = group | map(attribute='learner') | unique | list %}
+                  提醒您，
+                  {%- for name in names -%}
+                    {{ name }}
+                    {%- if not loop.last -%}
+                      {{ ' 和 ' if loop.index == (names | count) - 1 else '、' }}
+                    {%- endif -%}
+                  {%- endfor %}
+                  的 AmazingTalker 課程將在{{ offset }}分鐘後開始。
+                {%- endfor %}
+          - alias: 沒有待提醒課程時不改音量也不播放
+            condition: template
+            value_template: "{{ reminder_message | trim | length > 0 }}"
+          - alias: 播放合併後的課前提醒
+            sequence:
+              - variables:
+                  morning_message: "{{ reminder_message | trim }}"
+              - sequence: *play_announcement

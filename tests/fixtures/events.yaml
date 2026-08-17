@@ -1,0 +1,23 @@
+calendars:
+  calendar.amazingtalker_student_1:
+    friendly_name: Student One
+    events:
+      - uid: fake-uid-1
+        summary: AmazingTalker lesson
+        start: "2026-08-18T20:00:00+08:00"
+        end: "2026-08-18T20:50:00+08:00"
+      - uid: fake-uid-2
+        summary: AmazingTalker lesson
+        start: "2026-08-18T21:30:00+08:00"
+        end: "2026-08-18T22:20:00+08:00"
+  calendar.amazingtalker_student_2:
+    friendly_name: Student Two
+    events:
+      - uid: fake-uid-3
+        summary: AmazingTalker lesson
+        start: "2026-08-18T20:00:00+08:00"
+        end: "2026-08-18T20:50:00+08:00"
+      - uid: fake-all-day
+        summary: Ignore this all-day event
+        start: "2026-08-18"
+        end: "2026-08-19"
