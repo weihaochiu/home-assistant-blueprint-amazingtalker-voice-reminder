@@ -9,7 +9,7 @@ blueprint:
   source_url: >-
     https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-reminder/blob/main/blueprints/automation/weihaochiu/amazingtalker_voice_reminder.yaml
   homeassistant:
-    min_version: 2025.7.0
+    min_version: 2026.1.0
   input:
     learners_section:
       name: 學員行事曆
@@ -106,26 +106,129 @@ blueprint:
           selector:
             boolean:
         update_frequency:
-          name: 更新頻率
-          default: daily
+          name: 更新排程
+          description: 只會顯示目前排程模式需要的設定。
+          default:
+            active_choice: 每天
+            每天:
+              update_time: "07:00:00"
+            每週:
+              update_time: "07:00:00"
+              update_weekdays:
+                - monday
+            每月:
+              update_time: "07:00:00"
+              update_month_days:
+                - "1"
           selector:
-            select:
-              mode: dropdown
-              options:
-                - label: 每天
-                  value: daily
-                - label: 每週
-                  value: weekly
-                - label: 每月
-                  value: monthly
+            choose:
+              choices:
+                每天:
+                  selector:
+                    object:
+                      fields:
+                        update_time:
+                          label: 更新時間
+                          required: true
+                          selector:
+                            time:
+                每週:
+                  selector:
+                    object:
+                      fields:
+                        update_time:
+                          label: 更新時間
+                          required: true
+                          selector:
+                            time:
+                        update_weekdays:
+                          label: 更新星期
+                          required: true
+                          selector:
+                            select:
+                              multiple: true
+                              custom_value: false
+                              mode: dropdown
+                              options:
+                                - label: 星期一
+                                  value: monday
+                                - label: 星期二
+                                  value: tuesday
+                                - label: 星期三
+                                  value: wednesday
+                                - label: 星期四
+                                  value: thursday
+                                - label: 星期五
+                                  value: friday
+                                - label: 星期六
+                                  value: saturday
+                                - label: 星期日
+                                  value: sunday
+                每月:
+                  selector:
+                    object:
+                      fields:
+                        update_time:
+                          label: 更新時間
+                          required: true
+                          selector:
+                            time:
+                        update_month_days:
+                          label: 更新日期
+                          required: true
+                          selector:
+                            select:
+                              multiple: true
+                              custom_value: false
+                              mode: dropdown
+                              options:
+                                - {label: "1", value: "1"}
+                                - {label: "2", value: "2"}
+                                - {label: "3", value: "3"}
+                                - {label: "4", value: "4"}
+                                - {label: "5", value: "5"}
+                                - {label: "6", value: "6"}
+                                - {label: "7", value: "7"}
+                                - {label: "8", value: "8"}
+                                - {label: "9", value: "9"}
+                                - {label: "10", value: "10"}
+                                - {label: "11", value: "11"}
+                                - {label: "12", value: "12"}
+                                - {label: "13", value: "13"}
+                                - {label: "14", value: "14"}
+                                - {label: "15", value: "15"}
+                                - {label: "16", value: "16"}
+                                - {label: "17", value: "17"}
+                                - {label: "18", value: "18"}
+                                - {label: "19", value: "19"}
+                                - {label: "20", value: "20"}
+                                - {label: "21", value: "21"}
+                                - {label: "22", value: "22"}
+                                - {label: "23", value: "23"}
+                                - {label: "24", value: "24"}
+                                - {label: "25", value: "25"}
+                                - {label: "26", value: "26"}
+                                - {label: "27", value: "27"}
+                                - {label: "28", value: "28"}
+                                - {label: "29", value: "29"}
+                                - {label: "30", value: "30"}
+                                - {label: "31", value: "31"}
+
+    legacy_scheduled_update_section:
+      name: 舊版排程相容設定
+      icon: mdi:archive-clock
+      collapsed: true
+      description: >-
+        僅供既有 automation 保留舊版排程值。新建 automation 請使用上方「更新排程」，
+        不需要修改此區。
+      input:
         update_time:
-          name: 更新時間
+          name: 舊版更新時間
           default: "07:00:00"
           selector:
             time:
         update_weekday:
-          name: 每週更新星期
-          description: 只在 weekly 使用；Home Assistant 不會依頻率動態隱藏此欄位。
+          name: 舊版每週更新星期
           default: monday
           selector:
             select:
@@ -146,10 +249,8 @@ blueprint:
                 - label: 星期日
                   value: sunday
         update_month_day:
-          name: 每月更新日期
-          description: >-
-            只在 monthly 使用；其他頻率忽略且欄位不會動態隱藏。若當月沒有指定日期，
-            改在當月最後一天更新。
+          name: 舊版每月更新日期
+          description: 若當月沒有指定日期，改在當月最後一天更新。
           default: 1
           selector:
             number:
@@ -242,9 +343,6 @@ triggers:
     minutes: "/1"
     id: heartbeat
   - trigger: time
-    at: !input update_time
-    id: scheduled_update
-  - trigger: time
     at: !input morning_summary_time
     id: morning_summary
 
@@ -258,8 +356,9 @@ variables:
   attempt_media_resume_input: !input attempt_media_resume
   enable_scheduled_update_input: !input enable_scheduled_update
   update_frequency_input: !input update_frequency
-  update_weekday_input: !input update_weekday
-  update_month_day_input: !input update_month_day
+  legacy_update_time_input: !input update_time
+  legacy_update_weekday_input: !input update_weekday
+  legacy_update_month_day_input: !input update_month_day
   enable_morning_summary_input: !input enable_morning_summary
   enable_pre_class_reminders_input: !input enable_pre_class_reminders
   reminder_offsets_input: !input reminder_offsets
@@ -269,6 +368,68 @@ variables:
   # Numeric timestamps survive Home Assistant's cross-action template serialization.
   check_time: "{{ as_timestamp(now()) }}"
   check_minute: "{{ ((check_time | float(0)) // 60 * 60) | int }}"
+  # New choose-selector mappings and legacy scalar inputs are normalized once here.
+  schedule_mode: >-
+    {%- set modes = {
+      '每天': 'daily', '每日': 'daily', 'daily': 'daily',
+      '每週': 'weekly', 'weekly': 'weekly',
+      '每月': 'monthly', 'monthly': 'monthly'
+    } -%}
+    {%- if update_frequency_input is mapping -%}
+      {%- set active_choice = update_frequency_input.get('active_choice', '') | string | trim -%}
+      {{- modes.get(active_choice, '') -}}
+    {%- else -%}
+      {%- set legacy_mode = update_frequency_input | string | lower | trim -%}
+      {{- modes.get(legacy_mode, '') -}}
+    {%- endif -%}
+  schedule_config: >-
+    {%- if update_frequency_input is mapping -%}
+      {%- set active_choice = update_frequency_input.get('active_choice', '') | string | trim -%}
+      {%- set selected = update_frequency_input.get(active_choice, {}) -%}
+      {{- selected if selected is mapping else {} -}}
+    {%- else -%}
+      {{- {
+        'update_time': legacy_update_time_input,
+        'update_weekdays': legacy_update_weekday_input,
+        'update_month_days': legacy_update_month_day_input
+      } -}}
+    {%- endif -%}
+  schedule_time: >-
+    {%- if schedule_config is mapping -%}
+      {{- schedule_config.get('update_time', '') | string | trim -}}
+    {%- else -%}
+      {{- '' -}}
+    {%- endif -%}
+  schedule_weekdays: >-
+    {%- set allowed = [
+      'monday', 'tuesday', 'wednesday', 'thursday',
+      'friday', 'saturday', 'sunday'
+    ] -%}
+    {%- set raw = schedule_config.get('update_weekdays', [])
+      if schedule_config is mapping else [] -%}
+    {%- set values = [raw] if raw is string else
+      (raw if raw is iterable and raw is not mapping else []) -%}
+    {%- set ns = namespace(items=[]) -%}
+    {%- for item in values -%}
+      {%- set value = item | string | lower | trim -%}
+      {%- if value in allowed and value not in ns.items -%}
+        {%- set ns.items = ns.items + [value] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{- ns.items -}}
+  schedule_month_days: >-
+    {%- set raw = schedule_config.get('update_month_days', [])
+      if schedule_config is mapping else [] -%}
+    {%- set values = [raw] if raw is string or raw is number else
+      (raw if raw is iterable and raw is not mapping else []) -%}
+    {%- set ns = namespace(items=[]) -%}
+    {%- for item in values -%}
+      {%- set value = item | int(0) -%}
+      {%- if 1 <= value <= 31 and value not in ns.items -%}
+        {%- set ns.items = ns.items + [value] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{- ns.items | sort -}}
   calendar_entities: >-
     {% set ns = namespace(items=[]) %}
     {% for learner in learners_input if learner is mapping %}
@@ -294,36 +455,47 @@ conditions:
     value_template: "{{ calendar_entities | count > 0 }}"
 
 actions:
-  - choose:
-      - alias: 定期強制更新分支
-        conditions:
-          - condition: trigger
-            id: scheduled_update
-          - condition: template
-            value_template: "{{ enable_scheduled_update_input }}"
-          - alias: 符合每日、每週或月底 fallback 規則
-            condition: template
-            value_template: >-
-              {% set weekdays = {
-                'monday': 0, 'tuesday': 1, 'wednesday': 2,
-                'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
-              } %}
-              {% set run_time = as_local(as_datetime(check_time | float(0))) %}
-              {% set next_month = (run_time.replace(day=28) + timedelta(days=4)).replace(day=1) %}
-              {% set last_day = (next_month - timedelta(days=1)).day %}
-              {% set target_day = [update_month_day_input | int(1), last_day] | min %}
-              {{ update_frequency_input == 'daily'
-                 or (update_frequency_input == 'weekly'
-                     and run_time.weekday() == weekdays.get(update_weekday_input, 0))
-                 or (update_frequency_input == 'monthly'
-                     and run_time.day == target_day) }}
-        sequence:
-          - alias: 一次強制更新所有選取的行事曆
-            action: homeassistant.update_entity
-            target:
-              entity_id: "{{ calendar_entities }}"
-            continue_on_error: true
+  # This independent if deliberately continues into the heartbeat reminder flow. A single
+  # heartbeat can therefore perform both scheduled refresh and pre-class work.
+  - alias: 符合排程時定期強制更新
+    if:
+      - condition: trigger
+        id: heartbeat
+      - condition: template
+        value_template: "{{ enable_scheduled_update_input }}"
+      - alias: 符合時間與每日、每週或月底 fallback 規則
+        condition: template
+        value_template: >-
+          {%- set run_time = as_local(as_datetime(check_time | float(0))) -%}
+          {%- set configured_time = schedule_time | string | trim -%}
+          {%- set weekday_names = [
+            'monday', 'tuesday', 'wednesday', 'thursday',
+            'friday', 'saturday', 'sunday'
+          ] -%}
+          {%- set next_month = (run_time.replace(day=28) + timedelta(days=4)).replace(day=1) -%}
+          {%- set last_day = (next_month - timedelta(days=1)).day -%}
+          {%- set effective = namespace(days=[]) -%}
+          {%- for selected_day in schedule_month_days -%}
+            {%- set effective_day = [selected_day | int(0), last_day] | min -%}
+            {%- if effective_day > 0 and effective_day not in effective.days -%}
+              {%- set effective.days = effective.days + [effective_day] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{- configured_time | length >= 5
+             and run_time.strftime('%H:%M') == configured_time[:5]
+             and (schedule_mode == 'daily'
+               or (schedule_mode == 'weekly'
+                 and weekday_names[run_time.weekday()] in schedule_weekdays)
+               or (schedule_mode == 'monthly'
+                 and run_time.day in effective.days)) -}}
+    then:
+      - alias: 本分鐘一次強制更新所有選取的行事曆
+        action: homeassistant.update_entity
+        target:
+          entity_id: "{{ calendar_entities }}"
+        continue_on_error: true
 
+  - choose:
       - alias: 早晨摘要分支
         conditions:
           - condition: trigger

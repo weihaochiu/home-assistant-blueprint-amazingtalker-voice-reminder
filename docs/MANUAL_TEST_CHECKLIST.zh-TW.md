@@ -4,7 +4,7 @@
 
 ## 測試前準備
 
-- [ ] Home Assistant 2025.7.0 以上，且已備份 automation。
+- [ ] Home Assistant 2026.1.0 以上，且已備份 automation。
 - [ ] 已建立測試 TTS；第一輪使用 Google Translate TTS。
 - [ ] 已選至少一台播放器；HomePod Mini 先確認 Apple TV 整合可播放一般媒體。
 - [ ] 「設定 → 系統 → 網路」本機 URL 可由播放器存取。
@@ -88,8 +88,13 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 IC
 
 ## 定期更新與月底
 
-- [ ] daily、weekly、monthly 各只在正確本地時間/日期更新。
+- [ ] choose selector 在每天只顯示時間、每週只顯示時間與星期、每月只顯示時間與日期。
+- [ ] 每週可同時選星期一、三、五，且只在選取日的正確本地時間更新。
+- [ ] 每月可同時選 1、15、30，且只在選取日期的正確本地時間更新。
 - [ ] 平年二月 29/30/31 fallback 到 28；閏年到 29；小月 31 到 30。
+- [ ] 2026 年 2 月選 28、29、30、31 時，2/28 只更新一次。
+- [ ] `enable_scheduled_update: false` 時不做定期更新，但課前刷新與 verification 仍正常。
+- [ ] 定期更新與課前刷新同分鐘發生時，兩個流程都完成且 reminder 未漏播。
 - [ ] 排程只額外刷新，不改變 Remote Calendar 內建輪詢。
 
 ## 清理

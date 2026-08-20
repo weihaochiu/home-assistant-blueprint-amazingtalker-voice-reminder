@@ -21,7 +21,7 @@ This is an independent community project. It is not an official AmazingTalker pr
 
 ## Requirements
 
-- Home Assistant 2025.7.0 or newer. The repeatable structured object selector is the newest required schema feature; input sections and Remote Calendar were introduced earlier.
+- Home Assistant 2026.1.0 or newer. The choose selector used by the conditional schedule form was introduced in Home Assistant 2026.1.
 - One Home Assistant Remote Calendar entry per learner.
 - At least one `media_player` and one `tts` entity. Google Translate TTS is the first formal target.
 - The player must be able to fetch TTS media from Home Assistant. Check **Settings → System → Network** if generated speech cannot play.
@@ -73,10 +73,10 @@ Then select **Create automation**, add at least one learner and player, choose a
 | `restore_original_volume` | `true` | Save/restore each reported `volume_level` independently. |
 | `attempt_media_resume` | `false` | `false` sends `announce: false`; `true` sends `announce: true`. |
 | `enable_scheduled_update` | `true` | Enable the additional forced-refresh schedule. |
-| `update_frequency` | `daily` | Exactly one of `daily`, `weekly`, or `monthly`. |
-| `update_time` | `07:00:00` | Local time for the scheduled check. |
-| `update_weekday` | `monday` | Weekly only; ignored but not dynamically hidden for other frequencies. |
-| `update_month_day` | `1` | Day 1–31, monthly only; ignored but not dynamically hidden otherwise. |
+| `update_frequency` | Daily at `07:00:00` | Structured choose-selector schedule. Daily shows time only; weekly adds multiple weekdays; monthly adds multiple month days. |
+| `update_time` | `07:00:00` | Legacy compatibility value used only by existing scalar schedules. |
+| `update_weekday` | `monday` | Legacy compatibility value used only by existing scalar weekly schedules. |
+| `update_month_day` | `1` | Legacy compatibility value used only by existing scalar monthly schedules. |
 | `enable_morning_summary` | `true` | Enable the local-day morning summary. |
 | `morning_summary_time` | `07:12:00` | Ignored when morning summary is disabled. |
 | `enable_pre_class_reminders` | `true` | Enable heartbeat-based reminders. |
@@ -89,12 +89,19 @@ Input keys remain backward compatible. Future optional inputs will have defaults
 
 ## Update schedule
 
-- `daily`: all selected calendars at `update_time` every day.
-- `weekly`: the selected weekday at `update_time`.
-- `monthly`: `update_month_day` at `update_time`.
-- If day 29, 30, or 31 does not exist, use that month's final day. Leap-year February uses 29; common-year February uses 28.
+- **Daily:** only the update time is shown. For example, `07:00` refreshes every day at 07:00.
+- **Weekly:** the update time and a multiple-choice weekday field are shown. For example, Monday, Wednesday, and Friday at `07:00` refreshes on all three selected weekdays.
+- **Monthly:** the update time and a multiple-choice day field are shown. For example, 1, 15, and 30 at `07:00` refreshes on all three selected dates.
+- If a selected day 29, 30, or 31 does not exist, it falls back to that month's final day. Multiple selected dates that fall back to the same day are de-duplicated, so February receives one refresh for that minute.
+- Empty weekly or monthly selections fail safe and do not run a scheduled refresh.
 
-Weekly/monthly fields stay visible because Blueprint forms do not dynamically hide them based on another input.
+The existing one-minute heartbeat performs the scheduled check. It compares the local `HH:MM`, so the matching minute causes at most one scheduled refresh action. Scheduled refresh and pre-class refresh/reminder work remain independent within the same heartbeat.
+
+The scheduled forced refresh only makes an additional Remote Calendar update request. It cannot reduce the Remote Calendar integration's own built-in polling interval.
+
+### Existing automation migration
+
+The `update_frequency` input ID is retained. Existing automations whose value is the legacy `daily`, `weekly`, or `monthly` scalar continue to use their saved `update_time`, `update_weekday`, and `update_month_day` values. Those legacy inputs remain in a collapsed compatibility section so new users get the conditional schedule form. When editing an upgraded automation, reselect **Update schedule** once to migrate its form value to the new structured format; the runtime legacy schedule remains unchanged until then.
 
 ## Morning summary
 

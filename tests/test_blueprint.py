@@ -10,6 +10,7 @@ import re
 from urllib.parse import parse_qs, quote_plus, urlparse
 
 from jinja2 import Environment
+from jinja2.nativetypes import NativeEnvironment
 import pytest
 import yaml
 
@@ -88,25 +89,107 @@ def normalize_offsets(values) -> list[int]:
     return sorted(normalized, reverse=True)
 
 
-def scheduled_update_due(
-    moment: datetime, frequency: str, weekday: str = "monday", month_day: int = 1
-) -> bool:
-    weekdays = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
+WEEKDAYS = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+
+
+def _as_list(value) -> list:
+    if isinstance(value, (str, int, float)):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def normalize_schedule(
+    schedule,
+    *,
+    legacy_time: str = "07:00:00",
+    legacy_weekday="monday",
+    legacy_month_day=1,
+) -> dict:
+    modes = {
+        "每天": "daily",
+        "每日": "daily",
+        "daily": "daily",
+        "每週": "weekly",
+        "weekly": "weekly",
+        "每月": "monthly",
+        "monthly": "monthly",
     }
-    if frequency == "daily":
+    if isinstance(schedule, dict):
+        active_choice = str(schedule.get("active_choice", "")).strip()
+        selected = schedule.get(active_choice, {})
+        config = selected if isinstance(selected, dict) else {}
+        mode = modes.get(active_choice, "")
+    else:
+        mode = modes.get(str(schedule or "").strip().lower(), "")
+        config = {
+            "update_time": legacy_time,
+            "update_weekdays": legacy_weekday,
+            "update_month_days": legacy_month_day,
+        }
+
+    weekdays = []
+    for item in _as_list(config.get("update_weekdays", [])):
+        value = str(item).strip().lower()
+        if value in WEEKDAYS and value not in weekdays:
+            weekdays.append(value)
+
+    month_days = set()
+    for item in _as_list(config.get("update_month_days", [])):
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 31:
+            month_days.add(value)
+
+    return {
+        "mode": mode,
+        "time": str(config.get("update_time", "")).strip(),
+        "weekdays": weekdays,
+        "month_days": sorted(month_days),
+    }
+
+
+def effective_month_days(moment: datetime, selected_days: list[int]) -> list[int]:
+    last_day = calendar.monthrange(moment.year, moment.month)[1]
+    return sorted({min(day, last_day) for day in selected_days if 1 <= day <= 31})
+
+
+def scheduled_update_due(
+    moment: datetime,
+    schedule,
+    *,
+    enabled: bool = True,
+    legacy_time: str = "07:00:00",
+    legacy_weekday="monday",
+    legacy_month_day=1,
+) -> bool:
+    if not enabled:
+        return False
+    normalized = normalize_schedule(
+        schedule,
+        legacy_time=legacy_time,
+        legacy_weekday=legacy_weekday,
+        legacy_month_day=legacy_month_day,
+    )
+    if moment.strftime("%H:%M") != normalized["time"][:5]:
+        return False
+    if normalized["mode"] == "daily":
         return True
-    if frequency == "weekly":
-        return moment.weekday() == weekdays[weekday]
-    if frequency == "monthly":
-        last_day = calendar.monthrange(moment.year, moment.month)[1]
-        return moment.day == min(int(month_day), last_day)
+    if normalized["mode"] == "weekly":
+        return WEEKDAYS[moment.weekday()] in normalized["weekdays"]
+    if normalized["mode"] == "monthly":
+        return moment.day in effective_month_days(moment, normalized["month_days"])
     return False
 
 
@@ -216,7 +299,7 @@ def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
     assert metadata["domain"] == "automation"
     assert metadata["author"] == "weihaochiu"
     assert metadata["source_url"] == SOURCE_URL
-    assert metadata["homeassistant"]["min_version"] == "2025.7.0"
+    assert metadata["homeassistant"]["min_version"] == "2026.1.0"
 
 
 def test_all_input_references_are_declared_and_used(blueprint: dict) -> None:
@@ -253,14 +336,93 @@ def test_player_and_tts_selector_schema(blueprint: dict) -> None:
     assert tts["filter"] == [{"domain": "tts"}]
 
 
+def test_choose_schedule_selector_schema_and_conditional_fields(blueprint: dict) -> None:
+    inputs = flatten_inputs(blueprint["blueprint"]["input"])
+    schedule = inputs["update_frequency"]
+    choose = schedule["selector"]["choose"]
+    assert set(choose) == {"choices"}
+    choices = choose["choices"]
+    assert set(choices) == {"每天", "每週", "每月"}
+
+    daily = choices["每天"]["selector"]["object"]["fields"]
+    weekly = choices["每週"]["selector"]["object"]["fields"]
+    monthly = choices["每月"]["selector"]["object"]["fields"]
+    assert set(daily) == {"update_time"}
+    assert set(weekly) == {"update_time", "update_weekdays"}
+    assert set(monthly) == {"update_time", "update_month_days"}
+    assert daily["update_time"]["required"] is True
+    assert weekly["update_time"]["required"] is True
+    assert monthly["update_time"]["required"] is True
+
+    weekday_select = weekly["update_weekdays"]["selector"]["select"]
+    assert weekly["update_weekdays"]["required"] is True
+    assert weekday_select["multiple"] is True
+    assert weekday_select["custom_value"] is False
+    assert [option["value"] for option in weekday_select["options"]] == WEEKDAYS
+    assert [option["label"] for option in weekday_select["options"]] == [
+        "星期一",
+        "星期二",
+        "星期三",
+        "星期四",
+        "星期五",
+        "星期六",
+        "星期日",
+    ]
+
+    month_day_select = monthly["update_month_days"]["selector"]["select"]
+    assert monthly["update_month_days"]["required"] is True
+    assert month_day_select["multiple"] is True
+    assert month_day_select["custom_value"] is False
+    assert [option["value"] for option in month_day_select["options"]] == [
+        str(day) for day in range(1, 32)
+    ]
+    assert schedule["default"] == {
+        "active_choice": "每天",
+        "每天": {"update_time": "07:00:00"},
+        "每週": {"update_time": "07:00:00", "update_weekdays": ["monday"]},
+        "每月": {"update_time": "07:00:00", "update_month_days": ["1"]},
+    }
+
+
+def test_legacy_schedule_input_ids_remain_backward_compatible(blueprint: dict) -> None:
+    input_tree = blueprint["blueprint"]["input"]
+    legacy_section = input_tree["legacy_scheduled_update_section"]
+    assert legacy_section["collapsed"] is True
+    assert set(legacy_section["input"]) == {
+        "update_time",
+        "update_weekday",
+        "update_month_day",
+    }
+    inputs = flatten_inputs(input_tree)
+    assert inputs["update_time"]["default"] == "07:00:00"
+    assert inputs["update_weekday"]["default"] == "monday"
+    assert inputs["update_month_day"]["default"] == 1
+
+
 def test_modern_automation_syntax_and_heartbeat(blueprint: dict, blueprint_text: str) -> None:
     assert "triggers" in blueprint and "actions" in blueprint
     assert "platform:" not in blueprint_text
     assert "service:" not in blueprint_text
     heartbeat = next(item for item in blueprint["triggers"] if item["id"] == "heartbeat")
     assert heartbeat == {"trigger": "time_pattern", "minutes": "/1", "id": "heartbeat"}
+    assert {item["id"] for item in blueprint["triggers"]} == {"heartbeat", "morning_summary"}
+    assert "id: scheduled_update" not in blueprint_text
     assert blueprint["mode"] == "parallel"
     assert blueprint["max"] == 10
+
+
+def test_scheduled_refresh_is_independent_from_reminder_heartbeat(
+    blueprint: dict, blueprint_text: str
+) -> None:
+    scheduled_if = blueprint["actions"][0]
+    reminder_choose = blueprint["actions"][1]
+    assert "if" in scheduled_if and "then" in scheduled_if
+    assert "choose" in reminder_choose
+    assert "本分鐘一次強制更新所有選取的行事曆" in blueprint_text
+    assert "每分鐘 heartbeat 課前流程" in blueprint_text
+    assert blueprint_text.index("本分鐘一次強制更新所有選取的行事曆") < blueprint_text.index(
+        "每分鐘 heartbeat 課前流程"
+    )
 
 
 def test_templates_are_jinja_syntax_valid(blueprint: dict) -> None:
@@ -295,29 +457,200 @@ def test_reminder_offset_normalization(values, expected) -> None:
     assert normalize_offsets(values) == expected
 
 
-def test_daily_and_weekly_schedule() -> None:
-    monday = datetime(2026, 8, 17, 7, 0)
-    assert scheduled_update_due(monday, "daily")
-    assert scheduled_update_due(monday, "weekly", "monday")
-    assert not scheduled_update_due(monday, "weekly", "tuesday")
+def choose_schedule(choice: str, **values) -> dict:
+    return {"active_choice": choice, choice: values}
+
+
+def render_blueprint_schedule(blueprint: dict, schedule, moment: datetime) -> tuple[dict, bool]:
+    environment = NativeEnvironment(autoescape=False)
+    environment.globals.update(
+        as_datetime=lambda value: datetime.fromtimestamp(float(value), timezone.utc),
+        as_local=lambda value: value,
+        timedelta=timedelta,
+    )
+    context = {
+        "update_frequency_input": schedule,
+        "legacy_update_time_input": "07:00:00",
+        "legacy_update_weekday_input": "monday",
+        "legacy_update_month_day_input": 1,
+        "check_time": moment.replace(tzinfo=timezone.utc).timestamp(),
+    }
+    variables = blueprint["variables"]
+    for name in (
+        "schedule_mode",
+        "schedule_config",
+        "schedule_time",
+        "schedule_weekdays",
+        "schedule_month_days",
+    ):
+        context[name] = environment.from_string(variables[name]).render(context)
+    due_template = blueprint["actions"][0]["if"][2]["value_template"]
+    due = environment.from_string(due_template).render(context)
+    assert isinstance(due, bool), f"scheduled due template must render a native bool, got {due!r}"
+    return context, due
+
+
+def test_actual_blueprint_schedule_templates_normalize_and_render(blueprint: dict) -> None:
+    weekly = choose_schedule(
+        "每週",
+        update_time="07:00:00",
+        update_weekdays=["monday", "wednesday", "friday"],
+    )
+    context, due = render_blueprint_schedule(
+        blueprint, weekly, datetime(2026, 8, 19, 7, 0)
+    )
+    assert context["schedule_mode"] == "weekly"
+    assert context["schedule_time"] == "07:00:00"
+    assert context["schedule_weekdays"] == ["monday", "wednesday", "friday"]
+    assert due
+
+    monthly = choose_schedule(
+        "每月", update_time="07:00:00", update_month_days=["28", "29", "30", "31"]
+    )
+    context, due = render_blueprint_schedule(
+        blueprint, monthly, datetime(2026, 2, 28, 7, 0)
+    )
+    assert context["schedule_month_days"] == [28, 29, 30, 31]
+    assert due
+
+    context, due = render_blueprint_schedule(
+        blueprint, "weekly", datetime(2026, 8, 17, 7, 0)
+    )
+    assert context["schedule_mode"] == "weekly"
+    assert context["schedule_weekdays"] == ["monday"]
+    assert due
+
+    empty = choose_schedule("每月", update_time="07:00:00", update_month_days=[])
+    context, due = render_blueprint_schedule(
+        blueprint, empty, datetime(2026, 8, 1, 7, 0)
+    )
+    assert context["schedule_month_days"] == []
+    assert not due
+
+
+def test_daily_schedule_matches_exact_minute_once() -> None:
+    schedule = choose_schedule("每天", update_time="07:00:00")
+    assert scheduled_update_due(datetime(2026, 8, 17, 7, 0, 0), schedule)
+    assert scheduled_update_due(datetime(2026, 8, 17, 7, 0, 59), schedule)
+    assert not scheduled_update_due(datetime(2026, 8, 17, 7, 1), schedule)
+
+
+def test_weekly_single_and_multiple_schedule() -> None:
+    single = choose_schedule(
+        "每週", update_time="07:00:00", update_weekdays=["monday"]
+    )
+    assert scheduled_update_due(datetime(2026, 8, 17, 7, 0), single)
+    assert not scheduled_update_due(datetime(2026, 8, 18, 7, 0), single)
+
+    multiple = choose_schedule(
+        "每週",
+        update_time="07:00:00",
+        update_weekdays=["monday", "wednesday", "friday"],
+    )
+    expected = [True, False, True, False, True]
+    actual = [
+        scheduled_update_due(datetime(2026, 8, 17 + offset, 7, 0), multiple)
+        for offset in range(5)
+    ]
+    assert actual == expected
+
+
+def test_weekly_all_days_and_empty_selection() -> None:
+    all_days = choose_schedule(
+        "每週", update_time="07:00:00", update_weekdays=WEEKDAYS
+    )
+    assert all(
+        scheduled_update_due(datetime(2026, 8, 17 + offset, 7, 0), all_days)
+        for offset in range(7)
+    )
+    empty = choose_schedule("每週", update_time="07:00:00", update_weekdays=[])
+    assert not scheduled_update_due(datetime(2026, 8, 17, 7, 0), empty)
+
+
+def test_monthly_single_and_multiple_schedule() -> None:
+    single = choose_schedule(
+        "每月", update_time="07:00:00", update_month_days=["1"]
+    )
+    assert scheduled_update_due(datetime(2026, 8, 1, 7, 0), single)
+    assert not scheduled_update_due(datetime(2026, 8, 2, 7, 0), single)
+
+    multiple = choose_schedule(
+        "每月", update_time="07:00:00", update_month_days=["1", "15", "30"]
+    )
+    assert all(
+        scheduled_update_due(datetime(2026, 8, day, 7, 0), multiple)
+        for day in (1, 15, 30)
+    )
+    assert not scheduled_update_due(datetime(2026, 8, 29, 7, 0), multiple)
 
 
 @pytest.mark.parametrize(
-    ("moment", "requested_day", "expected"),
+    ("moment", "expected"),
     [
-        (datetime(2025, 2, 28), 29, True),
-        (datetime(2025, 2, 28), 30, True),
-        (datetime(2025, 2, 28), 31, True),
-        (datetime(2024, 2, 29), 29, True),
-        (datetime(2024, 2, 29), 30, True),
-        (datetime(2024, 2, 29), 31, True),
-        (datetime(2026, 4, 30), 31, True),
-        (datetime(2026, 8, 31), 31, True),
-        (datetime(2026, 8, 30), 31, False),
+        (datetime(2026, 1, 31, 7, 0), True),
+        (datetime(2026, 2, 28, 7, 0), True),
+        (datetime(2024, 2, 29, 7, 0), True),
+        (datetime(2026, 4, 30, 7, 0), True),
+        (datetime(2026, 8, 30, 7, 0), False),
     ],
 )
-def test_monthly_last_day_fallback(moment, requested_day, expected) -> None:
-    assert scheduled_update_due(moment, "monthly", month_day=requested_day) is expected
+def test_monthly_last_day_fallback(moment, expected) -> None:
+    schedule = choose_schedule(
+        "每月", update_time="07:00:00", update_month_days=["31"]
+    )
+    assert scheduled_update_due(moment, schedule) is expected
+
+
+def test_multiple_month_end_fallback_is_unique_and_runs_once() -> None:
+    february = datetime(2026, 2, 28, 7, 0)
+    mixed = choose_schedule(
+        "每月",
+        update_time="07:00:00",
+        update_month_days=["1", "15", "30", "31"],
+    )
+    normalized = normalize_schedule(mixed)
+    assert effective_month_days(february, normalized["month_days"]) == [1, 15, 28]
+
+    schedule = choose_schedule(
+        "每月",
+        update_time="07:00:00",
+        update_month_days=["28", "29", "30", "31"],
+    )
+    normalized = normalize_schedule(schedule)
+    assert effective_month_days(february, normalized["month_days"]) == [28]
+    assert scheduled_update_due(february, schedule)
+
+
+def test_monthly_empty_selection_and_invalid_types_fail_safe() -> None:
+    empty = choose_schedule("每月", update_time="07:00:00", update_month_days=[])
+    assert not scheduled_update_due(datetime(2026, 8, 1, 7, 0), empty)
+    invalid = choose_schedule(
+        "每月", update_time="07:00:00", update_month_days=[None, "bad", 0, 32]
+    )
+    assert normalize_schedule(invalid)["month_days"] == []
+    assert not scheduled_update_due(datetime(2026, 8, 1, 7, 0), invalid)
+
+
+def test_disabled_schedule_never_runs_but_does_not_gate_reminders() -> None:
+    schedule = choose_schedule("每天", update_time="07:00:00")
+    assert not scheduled_update_due(
+        datetime(2026, 8, 17, 7, 0), schedule, enabled=False
+    )
+
+
+def test_legacy_scalar_schedule_migration_preserves_values() -> None:
+    assert scheduled_update_due(
+        datetime(2026, 8, 19, 6, 45),
+        "weekly",
+        legacy_time="06:45:00",
+        legacy_weekday="wednesday",
+    )
+    assert scheduled_update_due(
+        datetime(2026, 2, 28, 8, 30),
+        "monthly",
+        legacy_time="08:30:00",
+        legacy_month_day=31,
+    )
 
 
 @pytest.mark.parametrize(

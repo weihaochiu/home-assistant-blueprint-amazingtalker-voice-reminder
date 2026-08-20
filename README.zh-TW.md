@@ -19,7 +19,7 @@
 
 ## 系統需求
 
-- Home Assistant 2025.7.0 以上。最低版本由可重複結構化 object selector 決定；input sections 與 Remote Calendar 都更早提供。
+- Home Assistant 2026.1.0 以上。條件式排程表單使用的 choose selector 於 Home Assistant 2026.1 引入。
 - 每位學員各一個 Remote Calendar；至少一個 `media_player` 與一個 `tts` 實體。
 - 第一個正式驗證目標為 Google Translate TTS、HomePod Mini 與 `media_player.play_media`。
 - 播放器需能存取 Home Assistant 產生的 TTS；若無聲音，檢查「設定 → 系統 → 網路」本機 URL。
@@ -71,10 +71,10 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 | `restore_original_volume` | `true` | 分別保存/恢復每台有回報的 `volume_level`。 |
 | `attempt_media_resume` | `false` | 關閉為 `announce: false`；開啟為 `announce: true`。 |
 | `enable_scheduled_update` | `true` | 額外強制更新排程。 |
-| `update_frequency` | `daily` | `daily`、`weekly`、`monthly` 三選一。 |
-| `update_time` | `07:00:00` | Home Assistant 本地檢查時間。 |
-| `update_weekday` | `monday` | weekly 才使用；其他頻率忽略，欄位不動態隱藏。 |
-| `update_month_day` | `1` | 1～31，monthly 才使用；其他頻率忽略，欄位不動態隱藏。 |
+| `update_frequency` | 每天 `07:00:00` | 結構化 choose selector 排程。每天只顯示時間；每週另顯示複選星期；每月另顯示複選日期。 |
+| `update_time` | `07:00:00` | 舊版相容值，只供既有 scalar 排程使用。 |
+| `update_weekday` | `monday` | 舊版相容值，只供既有每週 scalar 排程使用。 |
+| `update_month_day` | `1` | 舊版相容值，只供既有每月 scalar 排程使用。 |
 | `enable_morning_summary` | `true` | 啟用早晨摘要。 |
 | `morning_summary_time` | `07:12:00` | 關閉摘要時忽略。 |
 | `enable_pre_class_reminders` | `true` | 啟用 heartbeat 課前提醒。 |
@@ -87,12 +87,20 @@ Input key 會保持向後相容；未來新增選填 input 必有 default。
 
 ## 每天／每週／每月更新規則
 
-- `daily`：每天 `update_time` 更新全部 calendar。
-- `weekly`：指定星期的 `update_time` 更新。
-- `monthly`：每月 `update_month_day` 更新。
-- 選 29、30、31 日但當月沒有該日，改在月底；閏年二月 29 日、平年 28 日，小月 30 日。
+- **每天：**只顯示「更新時間」。例如每天 `07:00` 強制更新。
+- **每週：**只顯示「更新時間」與可複選的「更新星期」。例如同時選星期一、星期三、星期五，代表每週一、三、五 `07:00` 更新。
+- **每月：**只顯示「更新時間」與可複選的「更新日期」。例如同時選 1、15、30，代表每月 1、15、30 日 `07:00` 更新。
+- 選 29、30、31 日但當月沒有該日，會 fallback 到該月最後一天；閏年二月為 29 日、平年二月為 28 日、小月為 30 日。
+- 多個日期 fallback 到同一天時會先去重。例如 2026 年 2 月選 28、29、30、31，effective days 只有 `[28]`，2 月 28 日只更新一次。
+- 每週或每月沒有任何有效選擇時採 fail-safe，不執行定期更新。
 
-週/月欄位不會依頻率動態隱藏，這是 Blueprint 表單限制；不適用欄位會忽略。
+排程共用既有一分鐘 heartbeat，依 Home Assistant 本地 `HH:MM` 判斷，因此符合時間的一分鐘最多執行一次 scheduled refresh。定期更新與課前重新同步、reminder verification、課前提醒是獨立流程；同分鐘符合時仍會繼續執行兩者。
+
+定期強制更新只會額外要求 Remote Calendar 更新，無法降低 Remote Calendar integration 自身的內建更新頻率。
+
+### 既有 automation 升級
+
+`update_frequency` input ID 保持不變。既有 automation 若仍儲存舊版 `daily`、`weekly`、`monthly` scalar，會繼續使用原本的 `update_time`、`update_weekday`、`update_month_day`，不會默默換成不同排程。這些舊欄位收在預設折疊的「舊版排程相容設定」，新使用者只需使用條件式「更新排程」。升級後若開啟 automation 編輯器，請重新選擇一次「更新排程」以將表單值轉成新結構；在重新選擇以前，執行時仍保持舊排程。
 
 ## 早晨提醒
 
