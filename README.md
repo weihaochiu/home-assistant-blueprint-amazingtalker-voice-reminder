@@ -27,19 +27,91 @@ This is an independent community project. It is not an official AmazingTalker pr
 - The player must be able to fetch TTS media from Home Assistant. Check **Settings → System → Network** if generated speech cannot play.
 - HACS is not used. This repository contains no custom integration or `hacs.json`.
 
-## Create the Remote Calendars
+## First-time AmazingTalker calendar setup
 
-The Blueprint does not create Remote Calendar entries.
+The Blueprint reads an existing Home Assistant `calendar.*` entity. It does not obtain your AmazingTalker Calendar URL or create the Remote Calendar entry for you. Complete this flow once before configuring the Blueprint:
 
-1. Open **Settings → Devices & services → Add integration**.
-2. Add **Remote Calendar**.
-3. Create a separate entry for each learner and paste that learner's AmazingTalker ICS URL.
-4. Leave username and password empty; the AmazingTalker URL itself supplies the private read key.
-5. Select the generated `calendar.*` entity, for example `calendar.amazingtalker_student_1`, in the Blueprint.
+```text
+AmazingTalker Account Settings
+        ↓
+Connect to Calendar
+        ↓
+Copy URL
+        ↓
+Obtain the private AmazingTalker Calendar URL
+        ↓
+Home Assistant
+        ↓
+Remote Calendar integration
+        ↓
+Create a calendar.* entity
+        ↓
+AmazingTalker Voice Reminder Blueprint
+```
 
-> The AmazingTalker ICS URL is a private read key. Never commit it, put it in a GitHub Issue, or post it publicly. A documentation-only placeholder is `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`.
+These steps follow the official [AmazingTalker calendar instructions](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar) and [Home Assistant Remote Calendar documentation](https://www.home-assistant.io/integrations/remote_calendar/).
 
-Remote Calendar normally polls every 24 hours. The Blueprint's schedule is an additional forced update and cannot reduce the integration's built-in polling frequency.
+### Step 1: Copy the Calendar URL from AmazingTalker
+
+1. Sign in to AmazingTalker in a browser.
+2. Open your **Account Settings**.
+3. Scroll down to **Connect to Calendar**.
+4. Find the calendar link area.
+5. Select **Copy URL**.
+6. The private AmazingTalker Calendar URL is copied to your clipboard.
+
+This is a private **Calendar URL** that calendar software can subscribe to. Home Assistant Remote Calendar can read it directly; do not download an `.ics` file or open Developer Tools.
+
+> **⚠️ Never publish your AmazingTalker Calendar URL**
+>
+> Treat this URL like a password because it can expose private lesson data. Do not put it in GitHub, an Issue, a README, a public forum, or an unredacted screenshot. Documentation and support requests must use a placeholder such as:
+>
+> `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`
+
+### Step 2: Add Remote Calendar to Home Assistant
+
+1. Open Home Assistant.
+2. Go to **Settings → Devices & services**.
+3. Select **Add Integration** in the bottom-right corner.
+4. Search for `Remote Calendar`.
+5. Select **Remote Calendar**.
+
+Use Remote Calendar, not Google Calendar or Local Calendar.
+
+### Step 3: Create the AmazingTalker Remote Calendar
+
+Complete the Remote Calendar form as follows:
+
+- **Calendar Name:** choose a recognizable Home Assistant name such as `AmazingTalker Grace` or `AmazingTalker Amy`. This is only a display name.
+- **Calendar URL:** paste the complete URL copied from **AmazingTalker → Account Settings → Connect to Calendar → Copy URL**. The safe documentation example is `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`; use your private clipboard value only inside your own Home Assistant instance.
+- **Verify SSL certificate:** leave this enabled. AmazingTalker uses HTTPS, and normal setup should not disable certificate verification.
+- **Username / Password:** an AmazingTalker Calendar URL normally needs no additional credentials. Do not enter your AmazingTalker login. Home Assistant only prompts for these fields in an additional step when the URL requires HTTP Basic Authentication; it is normal not to see them.
+
+Follow the remaining on-screen instructions to finish. If setup fails, first verify that the Calendar URL is complete; disabling SSL verification is not recommended as a general troubleshooting step.
+
+### Step 4: Confirm the calendar entity
+
+1. Find the new Calendar entity under the Remote Calendar integration entry.
+2. Record its actual entity ID. It starts with `calendar.`, for example `calendar.amazingtalker_student_1`.
+3. Open Home Assistant's **Calendar** dashboard and select the new calendar.
+4. Confirm that upcoming AmazingTalker lessons appear. Remote Calendar is read-only and cannot modify the lessons.
+
+The actual entity ID can vary with the Calendar Name and existing entities. Use the ID shown by your Home Assistant instance rather than assuming it matches the example.
+
+### Step 5: Add the learner to the Blueprint
+
+1. Import the Blueprint using the button above and create an automation.
+2. Add one item to the **學員** field in the **學員行事曆** section.
+3. Select the `calendar.*` entity confirmed in Step 4.
+4. Optionally enter the spoken name. If it is blank, the Blueprint falls back to the calendar friendly name and then the entity ID.
+5. For multiple learners, create a separate Remote Calendar entry for each learner and add each entity to the Blueprint.
+6. Select at least one media player and one TTS entity, finish the remaining settings, and save the automation.
+
+### Step 6: Verify lesson data
+
+First confirm that lessons are visible in Home Assistant's Calendar dashboard; this proves Remote Calendar can read the Calendar URL. Then confirm that the Blueprint uses that same `calendar.*` entity. For a quick speech check, temporarily set the morning summary a few minutes ahead. It plays only when the local day contains a timed lesson; with no lessons, it does not play an empty introduction or change player volume.
+
+If no lessons appear in the Calendar dashboard, verify that the Calendar URL is complete, the entity is available, and the AmazingTalker account has an upcoming lesson. Never paste the private URL into an Issue or public support post. Remote Calendar fetches data at startup and then has a built-in 24-hour update interval. The Blueprint schedule performs additional forced updates and cannot reduce that built-in interval.
 
 ## Configure TTS
 
@@ -142,7 +214,7 @@ With restoration enabled, the Blueprint estimates a minimum speech duration, wai
 
 ## Privacy and security
 
-- Treat the ICS URL token like a password.
+- Treat the AmazingTalker Calendar URL like a password.
 - Never publish Home Assistant URLs/tokens, private network addresses, household entity IDs, learner names, or unredacted traces.
 - Examples use obvious placeholders such as `calendar.amazingtalker_student_1` and `media_player.living_room_speaker`.
 - Before contributing, run the privacy test and inspect `git diff`.
@@ -185,7 +257,7 @@ Open **Settings → Automations & scenes → Blueprints**, open this Blueprint's
 
 ## Technical basis
 
-Only official sources are used: [Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/), [selectors](https://www.home-assistant.io/docs/blueprint/selectors/), [Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/), [`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/), [TTS](https://www.home-assistant.io/integrations/tts), [`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/), and [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/).
+Only official sources are used: [AmazingTalker calendar instructions](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar), [Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/), [selectors](https://www.home-assistant.io/docs/blueprint/selectors/), [Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/), [`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/), [TTS](https://www.home-assistant.io/integrations/tts), [`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/), and [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/).
 
 ## Version and license
 
