@@ -108,34 +108,24 @@ def _as_list(value) -> list:
     return []
 
 
-def normalize_schedule(
-    schedule,
-    *,
-    legacy_time: str = "07:00:00",
-    legacy_weekday="monday",
-    legacy_month_day=1,
-) -> dict:
+def normalize_schedule(schedule) -> dict:
     modes = {
         "每天": "daily",
-        "每日": "daily",
-        "daily": "daily",
         "每週": "weekly",
-        "weekly": "weekly",
         "每月": "monthly",
-        "monthly": "monthly",
     }
     if isinstance(schedule, dict):
         active_choice = str(schedule.get("active_choice", "")).strip()
         selected = schedule.get(active_choice, {})
-        config = selected if isinstance(selected, dict) else {}
+        config = (
+            selected
+            if active_choice in modes and isinstance(selected, dict)
+            else {}
+        )
         mode = modes.get(active_choice, "")
     else:
-        mode = modes.get(str(schedule or "").strip().lower(), "")
-        config = {
-            "update_time": legacy_time,
-            "update_weekdays": legacy_weekday,
-            "update_month_days": legacy_month_day,
-        }
+        mode = ""
+        config = {}
 
     weekdays = []
     for item in _as_list(config.get("update_weekdays", [])):
@@ -170,18 +160,10 @@ def scheduled_update_due(
     schedule,
     *,
     enabled: bool = True,
-    legacy_time: str = "07:00:00",
-    legacy_weekday="monday",
-    legacy_month_day=1,
 ) -> bool:
     if not enabled:
         return False
-    normalized = normalize_schedule(
-        schedule,
-        legacy_time=legacy_time,
-        legacy_weekday=legacy_weekday,
-        legacy_month_day=legacy_month_day,
-    )
+    normalized = normalize_schedule(schedule)
     if moment.strftime("%H:%M") != normalized["time"][:5]:
         return False
     if normalized["mode"] == "daily":
@@ -384,19 +366,24 @@ def test_choose_schedule_selector_schema_and_conditional_fields(blueprint: dict)
     }
 
 
-def test_legacy_schedule_input_ids_remain_backward_compatible(blueprint: dict) -> None:
+def test_legacy_schedule_section_inputs_and_runtime_are_absent(
+    blueprint: dict, blueprint_text: str
+) -> None:
     input_tree = blueprint["blueprint"]["input"]
-    legacy_section = input_tree["legacy_scheduled_update_section"]
-    assert legacy_section["collapsed"] is True
-    assert set(legacy_section["input"]) == {
+    assert "legacy_scheduled_update_section" not in input_tree
+    assert list(input_tree).index("morning_section") == (
+        list(input_tree).index("scheduled_update_section") + 1
+    )
+    inputs = flatten_inputs(input_tree)
+    assert {
         "update_time",
         "update_weekday",
         "update_month_day",
-    }
-    inputs = flatten_inputs(input_tree)
-    assert inputs["update_time"]["default"] == "07:00:00"
-    assert inputs["update_weekday"]["default"] == "monday"
-    assert inputs["update_month_day"]["default"] == 1
+    }.isdisjoint(inputs)
+    assert "legacy_update_" not in blueprint_text
+    assert "!input update_time" not in blueprint_text
+    assert "!input update_weekday" not in blueprint_text
+    assert "!input update_month_day" not in blueprint_text
 
 
 def test_modern_automation_syntax_and_heartbeat(blueprint: dict, blueprint_text: str) -> None:
@@ -470,9 +457,6 @@ def render_blueprint_schedule(blueprint: dict, schedule, moment: datetime) -> tu
     )
     context = {
         "update_frequency_input": schedule,
-        "legacy_update_time_input": "07:00:00",
-        "legacy_update_weekday_input": "monday",
-        "legacy_update_month_day_input": 1,
         "check_time": moment.replace(tzinfo=timezone.utc).timestamp(),
     }
     variables = blueprint["variables"]
@@ -511,13 +495,6 @@ def test_actual_blueprint_schedule_templates_normalize_and_render(blueprint: dic
         blueprint, monthly, datetime(2026, 2, 28, 7, 0)
     )
     assert context["schedule_month_days"] == [28, 29, 30, 31]
-    assert due
-
-    context, due = render_blueprint_schedule(
-        blueprint, "weekly", datetime(2026, 8, 17, 7, 0)
-    )
-    assert context["schedule_mode"] == "weekly"
-    assert context["schedule_weekdays"] == ["monday"]
     assert due
 
     empty = choose_schedule("每月", update_time="07:00:00", update_month_days=[])
@@ -638,19 +615,41 @@ def test_disabled_schedule_never_runs_but_does_not_gate_reminders() -> None:
     )
 
 
-def test_legacy_scalar_schedule_migration_preserves_values() -> None:
-    assert scheduled_update_due(
-        datetime(2026, 8, 19, 6, 45),
+@pytest.mark.parametrize(
+    "schedule",
+    [
         "weekly",
-        legacy_time="06:45:00",
-        legacy_weekday="wednesday",
-    )
-    assert scheduled_update_due(
-        datetime(2026, 2, 28, 8, 30),
+        "daily",
         "monthly",
-        legacy_time="08:30:00",
-        legacy_month_day=31,
+        None,
+        [],
+        {"active_choice": "未知", "未知": {"update_time": "07:00:00"}},
+        {"active_choice": "每週", "每週": "malformed"},
+        {"active_choice": "每月", "每月": None},
+    ],
+)
+def test_non_mapping_unknown_and_malformed_schedules_fail_safe(schedule) -> None:
+    normalized = normalize_schedule(schedule)
+    assert normalized["mode"] == "" or normalized["time"] == ""
+    assert not scheduled_update_due(datetime(2026, 8, 17, 7, 0), schedule)
+
+
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        "weekly",
+        {"active_choice": "未知", "未知": {"update_time": "07:00:00"}},
+        {"active_choice": "每週", "每週": "malformed"},
+    ],
+)
+def test_actual_blueprint_schedule_templates_fail_safe(
+    blueprint: dict, schedule
+) -> None:
+    context, due = render_blueprint_schedule(
+        blueprint, schedule, datetime(2026, 8, 17, 7, 0)
     )
+    assert context["schedule_mode"] == "" or context["schedule_time"] == ""
+    assert not due
 
 
 @pytest.mark.parametrize(
@@ -861,10 +860,53 @@ def test_privacy_scan() -> None:
     assert forbidden_player not in combined
     calendar_ids = set(re.findall(r"calendar\.amazingtalker_[a-z0-9_]+", combined))
     assert calendar_ids <= {
+        "calendar.amazingtalker_amy",
+        "calendar.amazingtalker_grace",
         "calendar.amazingtalker_student_1",
         "calendar.amazingtalker_student_2",
         "calendar.amazingtalker_student_3",
     }
+
+
+def test_readmes_document_complete_remote_calendar_onboarding() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README.zh-TW.md").read_text(encoding="utf-8")
+    for phrase in (
+        "### 步驟 1：取得 AmazingTalker Calendar URL",
+        "### 步驟 2：在 Home Assistant 新增 Remote Calendar",
+        "### 步驟 3：填寫 Remote Calendar",
+        "### 步驟 4：確認 calendar entity",
+        "### 步驟 5：把 AmazingTalker Calendar 加入 Blueprint",
+        "### 步驟 6：第一次測試",
+        "Calendar Dashboard 看不到課程時，先不要檢查 Blueprint",
+    ):
+        assert phrase in chinese
+    for phrase in (
+        "### Step 1: Get the AmazingTalker Calendar URL",
+        "### Step 2: Add Remote Calendar in Home Assistant",
+        "### Step 3: Complete the Remote Calendar form",
+        "### Step 4: Confirm the calendar entity",
+        "### Step 5: Add the learner to the Blueprint",
+        "### Step 6: Run the first test",
+        "do not troubleshoot the Blueprint yet",
+    ):
+        assert phrase in english
+
+    for text, start_heading, end_heading in (
+        (chinese, "## 第一次設定 AmazingTalker 行事曆", "## TTS 設定"),
+        (english, "## First-time AmazingTalker calendar setup", "## Configure TTS"),
+    ):
+        onboarding = text.split(start_heading, 1)[1].split(end_heading, 1)[0]
+        assert "Google Calendar" not in onboarding
+
+
+def test_readmes_remove_legacy_schedule_input_rows() -> None:
+    for filename in ("README.md", "README.zh-TW.md"):
+        text = (ROOT / filename).read_text(encoding="utf-8")
+        assert "| `update_time`" not in text
+        assert "| `update_weekday`" not in text
+        assert "| `update_month_day`" not in text
+        assert "legacy_scheduled_update_section" not in text
 
 
 def test_all_repository_text_is_utf8_without_bom() -> None:

@@ -11,7 +11,7 @@ This is an independent community project. It is not an official AmazingTalker pr
 ## Features
 
 - Add any number of learners using the repeatable Home Assistant object selector.
-- Read each Remote Calendar coordinator cache every minute without downloading ICS every minute.
+- Read each Remote Calendar coordinator cache every minute without downloading the AmazingTalker Calendar URL every minute.
 - Optional daily, weekly, or monthly forced refresh with end-of-month fallback.
 - Morning summary covering every timed lesson for every learner; all-day events are ignored.
 - Any number of normalized pre-class reminder offsets, targeted refresh, and fail-closed final verification.
@@ -29,89 +29,198 @@ This is an independent community project. It is not an official AmazingTalker pr
 
 ## First-time AmazingTalker calendar setup
 
-The Blueprint reads an existing Home Assistant `calendar.*` entity. It does not obtain your AmazingTalker Calendar URL or create the Remote Calendar entry for you. Complete this flow once before configuring the Blueprint:
+The Blueprint reads an existing Home Assistant `calendar.*` entity. First copy the private Calendar URL from AmazingTalker, then use Home Assistant Remote Calendar to create that entity:
 
 ```text
-AmazingTalker Account Settings
+AmazingTalker
+        ↓
+Account Settings
         ↓
 Connect to Calendar
         ↓
 Copy URL
         ↓
-Obtain the private AmazingTalker Calendar URL
-        ↓
 Home Assistant
         ↓
-Remote Calendar integration
+Settings
         ↓
-Create a calendar.* entity
+Devices & services
+        ↓
+Add Integration
+        ↓
+Remote Calendar
+        ↓
+Calendar Name / Calendar URL / Verify SSL certificate
+        ↓
+Submit / Finish
+        ↓
+calendar.*
+        ↓
+Confirm lessons in the Calendar dashboard
         ↓
 AmazingTalker Voice Reminder Blueprint
 ```
 
 These steps follow the official [AmazingTalker calendar instructions](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar) and [Home Assistant Remote Calendar documentation](https://www.home-assistant.io/integrations/remote_calendar/).
 
-### Step 1: Copy the Calendar URL from AmazingTalker
+### Step 1: Get the AmazingTalker Calendar URL
 
 1. Sign in to AmazingTalker in a browser.
 2. Open your **Account Settings**.
 3. Scroll down to **Connect to Calendar**.
-4. Find the calendar link area.
+4. Find the Calendar subscription URL supplied by AmazingTalker.
 5. Select **Copy URL**.
-6. The private AmazingTalker Calendar URL is copied to your clipboard.
+6. The AmazingTalker Calendar URL is copied to your clipboard.
 
-This is a private **Calendar URL** that calendar software can subscribe to. Home Assistant Remote Calendar can read it directly; do not download an `.ics` file or open Developer Tools.
+**Copy URL gives you the private subscription URL for your AmazingTalker Calendar.** It is not a Home Assistant URL or a downloaded calendar file. Paste the complete URL directly into Remote Calendar. Do not download an `.ics` file, open the URL yourself, use Developer Tools, or inspect network requests.
 
-> **⚠️ Never publish your AmazingTalker Calendar URL**
+> **⚠️ The AmazingTalker Calendar URL is a private read URL**
 >
-> Treat this URL like a password because it can expose private lesson data. Do not put it in GitHub, an Issue, a README, a public forum, or an unredacted screenshot. Documentation and support requests must use a placeholder such as:
+> Treat it like a password because it can expose private lesson data. Do not commit it to Git or post it in a GitHub Issue, forum, public chat, README, or unredacted screenshot. Documentation and support requests must use this placeholder:
 >
 > `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`
 
-### Step 2: Add Remote Calendar to Home Assistant
+### Step 2: Add Remote Calendar in Home Assistant
 
 1. Open Home Assistant.
-2. Go to **Settings → Devices & services**.
-3. Select **Add Integration** in the bottom-right corner.
-4. Search for `Remote Calendar`.
-5. Select **Remote Calendar**.
+2. Open **Settings**.
+3. Select **Devices & services**.
+4. Select **Add Integration** in the bottom-right corner.
+5. Search for `Remote Calendar`.
+6. Select **Remote Calendar**.
 
-Use Remote Calendar, not Google Calendar or Local Calendar.
+Select **Remote Calendar** here rather than another calendar integration.
 
-### Step 3: Create the AmazingTalker Remote Calendar
+### Step 3: Complete the Remote Calendar form
 
-Complete the Remote Calendar form as follows:
+Enter the following values:
 
-- **Calendar Name:** choose a recognizable Home Assistant name such as `AmazingTalker Grace` or `AmazingTalker Amy`. This is only a display name.
-- **Calendar URL:** paste the complete URL copied from **AmazingTalker → Account Settings → Connect to Calendar → Copy URL**. The safe documentation example is `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`; use your private clipboard value only inside your own Home Assistant instance.
-- **Verify SSL certificate:** leave this enabled. AmazingTalker uses HTTPS, and normal setup should not disable certificate verification.
-- **Username / Password:** an AmazingTalker Calendar URL normally needs no additional credentials. Do not enter your AmazingTalker login. Home Assistant only prompts for these fields in an additional step when the URL requires HTTP Basic Authentication; it is normal not to see them.
+| Home Assistant field | Value for AmazingTalker |
+| --- | --- |
+| **Calendar Name** | A recognizable display name such as `AmazingTalker Grace`, `AmazingTalker Amy`, or `AmazingTalker Kevin`. |
+| **Calendar URL** | The complete private URL copied with AmazingTalker **Copy URL**. |
+| **Verify SSL certificate** | Keep enabled; normal HTTPS setup should not disable certificate verification. |
+| **Username** | Only appears in an additional step when the URL requires HTTP Basic Authentication; normally not needed for AmazingTalker. |
+| **Password** | Same as above; never enter your AmazingTalker login password. |
 
-Follow the remaining on-screen instructions to finish. If setup fails, first verify that the Calendar URL is complete; disabling SSL verification is not recommended as a general troubleshooting step.
+Calendar Name is only a display name. It does not guarantee the exact entity ID that Home Assistant will create.
+
+For **Calendar URL**, paste the complete value copied from **AmazingTalker → Account Settings → Connect to Calendar → Copy URL**. Do not remove the token at the end, add `.ics`, paste only part of the URL, or paste the AmazingTalker home page. Documentation must use only:
+
+```text
+https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN
+```
+
+Remote Calendar supports HTTP Basic Authentication, but an AmazingTalker private Calendar URL normally needs no additional credentials. It is normal if the UI never displays Username and Password. Never enter your AmazingTalker login email or password there.
+
+Select **Submit / Finish**. If the connection fails, first verify that the Calendar URL is complete; disabling SSL verification is not a general troubleshooting step.
 
 ### Step 4: Confirm the calendar entity
 
-1. Find the new Calendar entity under the Remote Calendar integration entry.
-2. Record its actual entity ID. It starts with `calendar.`, for example `calendar.amazingtalker_student_1`.
-3. Open Home Assistant's **Calendar** dashboard and select the new calendar.
-4. Confirm that upcoming AmazingTalker lessons appear. Remote Calendar is read-only and cannot modify the lessons.
+1. Finish the Remote Calendar setup.
+2. Return to **Settings → Devices & services**.
+3. Open the **Remote Calendar** integration.
+4. Find the Calendar entity you just created.
+5. Confirm that its actual entity ID starts with `calendar.`, for example `calendar.amazingtalker_grace`.
+6. Open Home Assistant's **Calendar** dashboard, select the calendar, and confirm that upcoming AmazingTalker lessons appear.
 
-The actual entity ID can vary with the Calendar Name and existing entities. Use the ID shown by your Home Assistant instance rather than assuming it matches the example.
+Remote Calendar is read-only and cannot modify lessons. The actual entity ID can vary with the Calendar Name and existing entities; always use the ID shown by your Home Assistant instance.
+
+> **If the Calendar dashboard does not show lessons, do not troubleshoot the Blueprint yet.**
+>
+> The problem is still at the AmazingTalker Calendar URL or Remote Calendar layer. Make the lessons appear in the Calendar dashboard before continuing.
 
 ### Step 5: Add the learner to the Blueprint
 
-1. Import the Blueprint using the button above and create an automation.
-2. Add one item to the **學員** field in the **學員行事曆** section.
-3. Select the `calendar.*` entity confirmed in Step 4.
-4. Optionally enter the spoken name. If it is blank, the Blueprint falls back to the calendar friendly name and then the entity ID.
-5. For multiple learners, create a separate Remote Calendar entry for each learner and add each entity to the Blueprint.
-6. Select at least one media player and one TTS entity, finish the remaining settings, and save the automation.
+1. Import the **AmazingTalker Voice Reminder Blueprint** with the button above.
+2. Create an automation.
+3. Expand **學員行事曆**.
+4. Add an item to **學員**.
+5. Under **AmazingTalker 行事曆**, select the `calendar.*` entity from Step 4.
+6. Leave **TTS 播報名稱（選填）** blank or enter the name TTS should speak.
+7. Select at least one media player and one TTS entity, then save and enable the automation.
 
-### Step 6: Verify lesson data
+Single-learner example:
 
-First confirm that lessons are visible in Home Assistant's Calendar dashboard; this proves Remote Calendar can read the Calendar URL. Then confirm that the Blueprint uses that same `calendar.*` entity. For a quick speech check, temporarily set the morning summary a few minutes ahead. It plays only when the local day contains a timed lesson; with no lessons, it does not play an empty introduction or change player volume.
+```text
+AmazingTalker 行事曆
+calendar.amazingtalker_grace
 
-If no lessons appear in the Calendar dashboard, verify that the Calendar URL is complete, the entity is available, and the AmazingTalker account has an upcoming lesson. Never paste the private URL into an Issue or public support post. Remote Calendar fetches data at startup and then has a built-in 24-hour update interval. The Blueprint schedule performs additional forced updates and cannot reduce that built-in interval.
+TTS 播報名稱
+Grace
+```
+
+For multiple private Calendar URLs, create one Remote Calendar entry for each URL and add each entity separately:
+
+```text
+Grace AmazingTalker URL
+        ↓
+Remote Calendar
+        ↓
+calendar.amazingtalker_grace
+
+Amy AmazingTalker URL
+        ↓
+Remote Calendar
+        ↓
+calendar.amazingtalker_amy
+
+Blueprint learner 1
+Calendar = calendar.amazingtalker_grace
+Spoken name = Grace
+
+Blueprint learner 2
+Calendar = calendar.amazingtalker_amy
+Spoken name = Amy
+```
+
+### Step 6: Run the first test
+
+Check these items in order:
+
+1. The Calendar dashboard shows an AmazingTalker lesson.
+2. The Blueprint uses that same `calendar.*` entity.
+3. The automation is enabled.
+4. The selected `tts.*` entity is available.
+5. The selected `media_player.*` is available.
+6. Temporarily set the morning summary a few minutes ahead, or use a suitable reminder offset for a real test.
+
+**The morning summary intentionally does not play when the local day has no timed lessons.** It also leaves player volume untouched; no speech in this case is not a Blueprint failure.
+
+### Remote Calendar updates
+
+Remote Calendar fetches remote data when the integration starts, retries after a failure, and then uses a built-in 24-hour update interval. The Blueprint's scheduled refresh, pre-class refresh, and final verification call `homeassistant.update_entity` when an additional refresh is needed.
+
+The normal one-minute heartbeat only uses `calendar.get_events` to read the Remote Calendar coordinator cache. **It does not download the AmazingTalker Calendar URL every minute.** Only scheduled refresh, pre-class refresh, and reminder verification request `update_entity`.
+
+### First-time setup troubleshooting
+
+```text
+AmazingTalker Calendar URL available?
+        │
+       Yes
+        ↓
+Remote Calendar created?
+        │
+       Yes
+        ↓
+calendar.* available?
+        │
+       Yes
+        ↓
+Lessons visible in Calendar dashboard?
+        │
+       Yes
+        ↓
+Correct calendar.* selected in Blueprint?
+        │
+       Yes
+        ↓
+TTS / media_player working?
+```
+
+- **No lessons in the Calendar dashboard:** the issue remains in the Calendar URL / Remote Calendar layer; do not troubleshoot the Blueprint yet.
+- **Lessons appear but speech does not:** check the selected Blueprint entity, automation enabled state, TTS, player, morning time, and reminder offsets.
 
 ## Configure TTS
 
@@ -146,9 +255,6 @@ Then select **Create automation**, add at least one learner and player, choose a
 | `attempt_media_resume` | `false` | `false` sends `announce: false`; `true` sends `announce: true`. |
 | `enable_scheduled_update` | `true` | Enable the additional forced-refresh schedule. |
 | `update_frequency` | Daily at `07:00:00` | Structured choose-selector schedule. Daily shows time only; weekly adds multiple weekdays; monthly adds multiple month days. |
-| `update_time` | `07:00:00` | Legacy compatibility value used only by existing scalar schedules. |
-| `update_weekday` | `monday` | Legacy compatibility value used only by existing scalar weekly schedules. |
-| `update_month_day` | `1` | Legacy compatibility value used only by existing scalar monthly schedules. |
 | `enable_morning_summary` | `true` | Enable the local-day morning summary. |
 | `morning_summary_time` | `07:12:00` | Ignored when morning summary is disabled. |
 | `enable_pre_class_reminders` | `true` | Enable heartbeat-based reminders. |
@@ -157,7 +263,7 @@ Then select **Create automation**, add at least one learner and player, choose a
 | `pre_class_refresh_minutes` | `60` | Minutes before class for targeted refresh. |
 | `verify_before_each_reminder` | `true` | Refresh and confirm immediately before playback; failure skips the affected reminder. |
 
-Input keys remain backward compatible. Future optional inputs will have defaults so existing automations keep loading.
+Future optional inputs will have defaults so existing automations do not fail because a new field is missing.
 
 ## Update schedule
 
@@ -171,9 +277,21 @@ The existing one-minute heartbeat performs the scheduled check. It compares the 
 
 The scheduled forced refresh only makes an additional Remote Calendar update request. It cannot reduce the Remote Calendar integration's own built-in polling interval.
 
-### Existing automation migration
+### Upgrading an old schedule
 
-The `update_frequency` input ID is retained. Existing automations whose value is the legacy `daily`, `weekly`, or `monthly` scalar continue to use their saved `update_time`, `update_weekday`, and `update_month_day` values. Those legacy inputs remain in a collapsed compatibility section so new users get the conditional schedule form. When editing an upgraded automation, reselect **Update schedule** once to migrate its form value to the new structured format; the runtime legacy schedule remains unchanged until then.
+This release removes the old `update_time`, `update_weekday`, and `update_month_day` inputs and scalar schedule runtime. The official Home Assistant 2026.1.0 [Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) permits extra stored input keys, while [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) only rejects missing inputs declared by the new Blueprint. Those three stale keys are therefore ignored and do not by themselves invalidate the automation or Blueprint.
+
+An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The new runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
+
+After updating the Blueprint:
+
+1. Open the existing automation.
+2. Expand **定期強制更新**.
+3. Reselect **每天**, **每週**, or **每月** under **更新排程**.
+4. Set the time and any required weekdays or month days.
+5. Save the automation.
+
+There is no need to remove stale inputs by manually editing YAML; save the structured schedule in the automation editor.
 
 ## Morning summary
 
@@ -243,7 +361,7 @@ On Linux/macOS use `.venv/bin/python`. See [the Traditional Chinese manual check
 
 ## Update the Blueprint
 
-Open **Settings → Automations & scenes → Blueprints**, open this Blueprint's menu, and choose **Re-import Blueprint**. Review release notes first. Re-import overwrites the stored Blueprint while retaining compatible automation inputs.
+Open **Settings → Automations & scenes → Blueprints**, open this Blueprint's menu, and choose **Re-import Blueprint**. Automations with an old scalar schedule must then reselect the structured schedule as described under “Upgrading an old schedule.”
 
 ## Known limitations
 

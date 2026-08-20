@@ -3,7 +3,7 @@ blueprint:
   description: >-
     AmazingTalker Multi-Learner Voice Reminder。從多個 Remote Calendar 行事曆讀取課程，
     提供每日摘要、可自訂課前提醒、取消/改期前重新確認、多播放器播報與個別音量恢復。
-    本專案非 AmazingTalker 官方專案。AmazingTalker ICS URL 是私人讀取金鑰，請勿公開。
+    本專案非 AmazingTalker 官方專案。AmazingTalker Calendar URL 是私人讀取網址，請勿公開。
   domain: automation
   author: weihaochiu
   source_url: >-
@@ -15,7 +15,7 @@ blueprint:
       name: 學員行事曆
       icon: mdi:calendar-account
       description: >-
-        每位學員需先建立一個 Remote Calendar。至少新增一筆。ICS URL 是私人讀取金鑰，
+        每位學員需先建立一個 Remote Calendar。至少新增一筆。Calendar URL 是私人讀取網址，
         不可貼到 GitHub、Issue 或公開論壇。
       input:
         learners:
@@ -214,51 +214,6 @@ blueprint:
                                 - {label: "30", value: "30"}
                                 - {label: "31", value: "31"}
 
-    legacy_scheduled_update_section:
-      name: 舊版排程相容設定
-      icon: mdi:archive-clock
-      collapsed: true
-      description: >-
-        僅供既有 automation 保留舊版排程值。新建 automation 請使用上方「更新排程」，
-        不需要修改此區。
-      input:
-        update_time:
-          name: 舊版更新時間
-          default: "07:00:00"
-          selector:
-            time:
-        update_weekday:
-          name: 舊版每週更新星期
-          default: monday
-          selector:
-            select:
-              mode: dropdown
-              options:
-                - label: 星期一
-                  value: monday
-                - label: 星期二
-                  value: tuesday
-                - label: 星期三
-                  value: wednesday
-                - label: 星期四
-                  value: thursday
-                - label: 星期五
-                  value: friday
-                - label: 星期六
-                  value: saturday
-                - label: 星期日
-                  value: sunday
-        update_month_day:
-          name: 舊版每月更新日期
-          description: 若當月沒有指定日期，改在當月最後一天更新。
-          default: 1
-          selector:
-            number:
-              min: 1
-              max: 31
-              step: 1
-              mode: box
-
     morning_section:
       name: 當天早晨課程播報
       icon: mdi:weather-sunset-up
@@ -356,9 +311,6 @@ variables:
   attempt_media_resume_input: !input attempt_media_resume
   enable_scheduled_update_input: !input enable_scheduled_update
   update_frequency_input: !input update_frequency
-  legacy_update_time_input: !input update_time
-  legacy_update_weekday_input: !input update_weekday
-  legacy_update_month_day_input: !input update_month_day
   enable_morning_summary_input: !input enable_morning_summary
   enable_pre_class_reminders_input: !input enable_pre_class_reminders
   reminder_offsets_input: !input reminder_offsets
@@ -368,31 +320,28 @@ variables:
   # Numeric timestamps survive Home Assistant's cross-action template serialization.
   check_time: "{{ as_timestamp(now()) }}"
   check_minute: "{{ ((check_time | float(0)) // 60 * 60) | int }}"
-  # New choose-selector mappings and legacy scalar inputs are normalized once here.
+  # Only choose-selector mappings are valid. Unknown or scalar values fail safe.
   schedule_mode: >-
     {%- set modes = {
-      '每天': 'daily', '每日': 'daily', 'daily': 'daily',
-      '每週': 'weekly', 'weekly': 'weekly',
-      '每月': 'monthly', 'monthly': 'monthly'
+      '每天': 'daily',
+      '每週': 'weekly',
+      '每月': 'monthly'
     } -%}
     {%- if update_frequency_input is mapping -%}
       {%- set active_choice = update_frequency_input.get('active_choice', '') | string | trim -%}
       {{- modes.get(active_choice, '') -}}
     {%- else -%}
-      {%- set legacy_mode = update_frequency_input | string | lower | trim -%}
-      {{- modes.get(legacy_mode, '') -}}
+      {{- '' -}}
     {%- endif -%}
   schedule_config: >-
     {%- if update_frequency_input is mapping -%}
       {%- set active_choice = update_frequency_input.get('active_choice', '') | string | trim -%}
       {%- set selected = update_frequency_input.get(active_choice, {}) -%}
-      {{- selected if selected is mapping else {} -}}
+      {{- selected
+        if active_choice in ['每天', '每週', '每月'] and selected is mapping
+        else {} -}}
     {%- else -%}
-      {{- {
-        'update_time': legacy_update_time_input,
-        'update_weekdays': legacy_update_weekday_input,
-        'update_month_days': legacy_update_month_day_input
-      } -}}
+      {{- {} -}}
     {%- endif -%}
   schedule_time: >-
     {%- if schedule_config is mapping -%}

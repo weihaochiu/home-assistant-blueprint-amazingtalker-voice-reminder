@@ -9,7 +9,7 @@
 ## 功能
 
 - 使用可重複 object selector 新增任意數量學員。
-- 每分鐘只讀 Remote Calendar coordinator 快取，不會每分鐘下載 ICS。
+- 每分鐘只讀 Remote Calendar coordinator 快取，不會每分鐘下載 AmazingTalker Calendar URL。
 - 每日、每週、每月額外強制更新與月底 fallback。
 - 一次播報當天所有非全天課程，支援一位學員多堂課。
 - 任意段課前提醒、課前重新同步及每段播放前 fail-closed 最後確認。
@@ -27,90 +27,198 @@
 
 ## 第一次設定 AmazingTalker 行事曆
 
-Blueprint 會讀取既有的 Home Assistant `calendar.*` 實體，不會代替你取得 AmazingTalker Calendar 網址或建立 Remote Calendar。第一次使用時，請依序完成：
+Blueprint 只會讀取 Home Assistant 已建立的 `calendar.*` 實體。第一次使用時，請從 AmazingTalker 取得私人 Calendar URL，再由 Home Assistant 的 Remote Calendar 建立實體：
 
 ```text
-AmazingTalker Account Settings
+AmazingTalker
+        ↓
+Account Settings
         ↓
 Connect to Calendar
         ↓
 Copy URL
         ↓
-取得 AmazingTalker Calendar 私人網址
-        ↓
 Home Assistant
         ↓
-Remote Calendar Integration
+Settings
         ↓
-建立 calendar.* entity
+Devices & services
+        ↓
+Add Integration
+        ↓
+Remote Calendar
+        ↓
+Calendar Name / Calendar URL / Verify SSL certificate
+        ↓
+Submit / Finish
+        ↓
+calendar.*
+        ↓
+Calendar Dashboard 確認課程
         ↓
 AmazingTalker Voice Reminder Blueprint
 ```
 
 以下步驟依據 [AmazingTalker 官方 Calendar 說明](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar) 與 [Home Assistant 官方 Remote Calendar 說明](https://www.home-assistant.io/integrations/remote_calendar/)。
 
-### 步驟 1：從 AmazingTalker 取得 Calendar 網址
+### 步驟 1：取得 AmazingTalker Calendar URL
 
 1. 使用瀏覽器登入 AmazingTalker。
-2. 進入自己的 **Account Settings（帳號設定）**。
+2. 開啟自己的 **Account Settings（帳號設定）**。
 3. 在設定頁向下找到 **Connect to Calendar**。
-4. 找到 Calendar 連結區域。
-5. 點擊 **Copy URL**。
-6. AmazingTalker Calendar 的私人網址會複製到剪貼簿。
+4. 找到 AmazingTalker 提供的 Calendar subscription URL。
+5. 按下 **Copy URL**。
+6. AmazingTalker Calendar URL 會複製到剪貼簿。
 
-取得的是 **Calendar URL（Calendar 網址）**。這是一個可供 Calendar 軟體訂閱的私人網址，Home Assistant 的 Remote Calendar 可以直接讀取；不需要自行下載 `.ics` 檔，也不需要開啟 Developer Tools。
+**Copy URL 得到的是 AmazingTalker Calendar 的私人訂閱網址。**它不是 Home Assistant URL，也不是下載後的 Calendar 檔案。後續只要把完整網址直接貼入 Remote Calendar：不需要下載 `.ics`、不需要自行在瀏覽器打開網址、不需要 Developer Tools，也不需要從 Network request 尋找 API。
 
-> **⚠️ 請勿公開 AmazingTalker Calendar URL**
+> **⚠️ AmazingTalker Calendar URL 是私人讀取網址**
 >
-> 這個網址可讀取私人課程資料，請視同密碼保管。請勿貼到 GitHub、GitHub Issue、README、公開論壇，也不要讓完整網址出現在螢幕截圖中。文件或求助時只能使用下列假資料：
+> 這個網址可讀取私人課程資料，請視同密碼保管。不要 commit 到 Git、不要貼到 GitHub Issue、論壇、公開聊天或 README，也不要讓完整網址出現在螢幕截圖中。文件或求助時只能使用下列假資料：
 >
 > `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`
 
-### 步驟 2：在 Home Assistant 安裝 Remote Calendar
+### 步驟 2：在 Home Assistant 新增 Remote Calendar
 
 1. 開啟 Home Assistant。
 2. 進入 **設定（Settings）**。
 3. 選擇 **裝置與服務（Devices & services）**。
-4. 點選右下角的 **新增整合（Add Integration）**。
+4. 點選右下角 **新增整合（Add Integration）**。
 5. 搜尋 `Remote Calendar`。
 6. 選擇 **Remote Calendar**。
 
-請使用 Remote Calendar，不要選 Google Calendar 或 Local Calendar。
+這裡必須選 **Remote Calendar**，不要改用其他 Calendar integration。
 
-### 步驟 3：建立 AmazingTalker Remote Calendar
+### 步驟 3：填寫 Remote Calendar
 
-依照 Remote Calendar 設定畫面填寫：
+依照 Home Assistant 畫面填寫：
 
-- **Calendar Name：**輸入 Home Assistant 中方便辨認的名稱，例如 `AmazingTalker Grace` 或 `AmazingTalker Amy`。這只是顯示名稱，可依實際使用者自行命名。
-- **Calendar URL：**貼上步驟 1 從 **AmazingTalker → Account Settings → Connect to Calendar → Copy URL** 取得的完整網址。文件中的安全範例是 `https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN`；請在自己的 Home Assistant 中使用剪貼簿裡的私人網址。
-- **Verify SSL certificate：**保持啟用。AmazingTalker 使用 HTTPS，一般設定不應關閉 SSL 憑證驗證。
-- **Username / Password：**AmazingTalker Calendar URL 一般不需要另外輸入帳號或密碼，請勿填入 AmazingTalker 登入帳密。Home Assistant 只有在 Calendar URL 需要 HTTP Basic Authentication 時，才會另外要求 Username 與 Password；沒有出現這一步是正常的。
+| Home Assistant 欄位 | AmazingTalker 要填什麼 |
+| --- | --- |
+| **Calendar Name** | 自訂容易辨認的顯示名稱，例如 `AmazingTalker Grace`、`AmazingTalker Amy` 或 `AmazingTalker Kevin`。 |
+| **Calendar URL** | 貼上 AmazingTalker **Copy URL** 複製的完整私人網址。 |
+| **Verify SSL certificate** | 保持開啟；HTTPS 正常情況不應關閉憑證驗證。 |
+| **Username** | 只有 URL 需要 HTTP Basic Authentication 時才會在額外步驟出現；AmazingTalker URL 一般不需要。 |
+| **Password** | 同上；不要填入 AmazingTalker 登入密碼。 |
 
-確認資料後，依畫面指示完成設定。若一般連線發生問題，請先重新確認 Calendar URL 是否完整，勿以關閉 SSL 驗證作為一般疑難排解步驟。
+Calendar Name 只是 Home Assistant 的自訂顯示名稱，不保證最後的 entity ID 與它完全相同。
+
+在 **Calendar URL** 欄位，將剛才從 **AmazingTalker → Account Settings → Connect to Calendar → Copy URL** 複製的完整網址直接貼上。不要移除尾端 token、不要手動補 `.ics`、不要只貼一部分，也不要貼成 AmazingTalker 首頁網址。文件中的安全格式只能是：
+
+```text
+https://api.amazingtalker.com/v1/user/calendar/REPLACE_WITH_YOUR_PRIVATE_TOKEN
+```
+
+Remote Calendar 支援 HTTP Basic Authentication，但 AmazingTalker 的私人 Calendar URL 一般不需要額外帳密。若 Home Assistant 沒有顯示 Username / Password 畫面是正常的；請勿把 AmazingTalker 登入 Email 或 Password 填入 Remote Calendar。
+
+確認資料後按畫面上的 **Submit / Finish（提交／完成）**。若連線失敗，先確認 Calendar URL 是否完整；不要把關閉 SSL verification 當作一般疑難排解方式。
 
 ### 步驟 4：確認 calendar entity
 
-1. 設定完成後，在 Home Assistant 的 Remote Calendar 整合項目下找到新建立的 Calendar entity。
-2. 記下實際 entity ID；它會以 `calendar.` 開頭，例如 `calendar.amazingtalker_student_1`。
-3. 開啟 Home Assistant 的 **行事曆（Calendar）** dashboard，勾選剛建立的行事曆。
-4. 確認近期 AmazingTalker 課程有顯示。Remote Calendar 是唯讀整合，不會修改 AmazingTalker 課程。
+1. 完成 Remote Calendar 設定。
+2. 回到 **設定（Settings）→ 裝置與服務（Devices & services）**。
+3. 開啟 **Remote Calendar** integration。
+4. 找到剛建立的 Calendar entity。
+5. 確認實際 entity ID 以 `calendar.` 開頭，例如 `calendar.amazingtalker_grace`。
+6. 開啟 Home Assistant 的 **行事曆（Calendar）** dashboard，勾選剛建立的行事曆，確認近期 AmazingTalker 課程有顯示。
 
-Entity ID 可能因 Calendar Name 與既有實體而不同，不要假設一定是範例名稱；請以自己的 Home Assistant 實際顯示值為準。
+Remote Calendar 是唯讀整合，不會修改 AmazingTalker 課程。Entity ID 可能因 Calendar Name 與既有實體而不同，請以自己的 Home Assistant 實際顯示值為準。
 
-### 步驟 5：在 Blueprint 加入學員
+> **Calendar Dashboard 看不到課程時，先不要檢查 Blueprint。**
+>
+> 這代表問題仍在 AmazingTalker Calendar URL 或 Remote Calendar 層。先讓課程正確出現在 Calendar dashboard，再繼續設定 Blueprint。
 
-1. 使用本頁上方按鈕匯入 Blueprint，並選擇建立 automation。
-2. 在 **學員行事曆** 區段的 **學員** 欄位新增一位學員。
-3. 在 Calendar entity 選擇步驟 4 確認過的 `calendar.*` 實體。
-4. 視需要填寫播報名稱；留空時會依序使用 Calendar 的 friendly name 或 entity ID。
-5. 有多位學員時，為每位學員分別建立 Remote Calendar，再逐一加入 Blueprint。
-6. 選擇至少一個播放器與一個 TTS 實體，完成其他設定後儲存 automation。
+### 步驟 5：把 AmazingTalker Calendar 加入 Blueprint
 
-### 步驟 6：確認課程是否成功讀取
+1. 使用本頁上方按鈕匯入 **AmazingTalker Voice Reminder Blueprint**。
+2. 建立 Automation。
+3. 展開 **學員行事曆**。
+4. 在 **學員** 欄位新增一筆。
+5. **AmazingTalker 行事曆**選擇步驟 4 建立的 `calendar.*` entity。
+6. **TTS 播報名稱（選填）**可以留白，也可以輸入希望 TTS 念出的名稱。
+7. 選擇至少一個播放器與一個 TTS 實體，完成其他設定後儲存並啟用 automation。
 
-先在 Home Assistant 的 Calendar dashboard 確認課程可見；這代表 Remote Calendar 已能讀取該 Calendar URL。接著確認 Blueprint 選到同一個 `calendar.*` 實體。可將早晨摘要時間暫時設為幾分鐘後進行測試；只有當天存在非全天課程時才會播放，沒有課程時不會播放只有開場白的空摘要，也不會調整播放器音量。
+單一學員範例：
 
-若 Calendar dashboard 看不到課程，請先檢查 Calendar URL 是否完整、Remote Calendar entity 是否可用，以及 AmazingTalker 帳號是否確實有近期課程。不要把私人網址貼到 Issue 或公開求助內容。Remote Calendar 啟動時會擷取資料，之後內建更新間隔為每 24 小時；Blueprint 排程是額外強制更新，無法降低整合本身的內建更新頻率。
+```text
+AmazingTalker 行事曆
+calendar.amazingtalker_grace
+
+TTS 播報名稱
+Grace
+```
+
+多位學員使用不同 Calendar URL 時，每個 URL 各建立一個 Remote Calendar，再分別加入 Blueprint：
+
+```text
+Grace AmazingTalker URL
+        ↓
+Remote Calendar
+        ↓
+calendar.amazingtalker_grace
+
+Amy AmazingTalker URL
+        ↓
+Remote Calendar
+        ↓
+calendar.amazingtalker_amy
+
+Blueprint 學員 1
+Calendar = calendar.amazingtalker_grace
+播報名稱 = Grace
+
+Blueprint 學員 2
+Calendar = calendar.amazingtalker_amy
+播報名稱 = Amy
+```
+
+### 步驟 6：第一次測試
+
+依序確認：
+
+1. Calendar dashboard 已看得到 AmazingTalker 課程。
+2. Blueprint 選到相同的 `calendar.*` entity。
+3. Automation 已啟用。
+4. 選取的 `tts.*` entity 可用。
+5. 選取的 `media_player.*` 可用。
+6. 暫時把早晨摘要時間設成幾分鐘後，或使用適合的 reminder offset 進行實際測試。
+
+**當天沒有非全天課程時，早晨摘要本來就不會播放，也不會調整音量。**這是正常的 no-course 行為，不代表 Blueprint 故障。
+
+### Remote Calendar 更新方式
+
+Remote Calendar integration 啟動時會抓取遠端資料；失敗時會重試，之後內建更新間隔為每 24 小時。Blueprint 的定期強制更新、課前重新同步與每段提醒前最後確認，會在需要時額外呼叫 `homeassistant.update_entity` 要求刷新。
+
+每分鐘 heartbeat 正常只用 `calendar.get_events` 讀取 Remote Calendar coordinator cache，**不會每分鐘下載 AmazingTalker Calendar URL**。只有 scheduled refresh、pre-class refresh 與 reminder verification 會要求 `update_entity`。
+
+### 第一次設定疑難排解
+
+```text
+AmazingTalker 有 Calendar URL？
+        │
+       Yes
+        ↓
+Remote Calendar 建立成功？
+        │
+       Yes
+        ↓
+calendar.* available？
+        │
+       Yes
+        ↓
+Calendar Dashboard 看得到課？
+        │
+       Yes
+        ↓
+Blueprint 選對 calendar.*？
+        │
+       Yes
+        ↓
+TTS / media_player 正常？
+```
+
+- **Calendar Dashboard 沒有課程：**問題仍在 Calendar URL／Remote Calendar 層，先不要檢查 Blueprint。
+- **Calendar Dashboard 有課但沒有播報：**再檢查 Blueprint 選取的 entity、Automation 是否啟用、TTS、播放器、早晨時間或 reminder offset。
 
 ## TTS 設定
 
@@ -145,9 +253,6 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 | `attempt_media_resume` | `false` | 關閉為 `announce: false`；開啟為 `announce: true`。 |
 | `enable_scheduled_update` | `true` | 額外強制更新排程。 |
 | `update_frequency` | 每天 `07:00:00` | 結構化 choose selector 排程。每天只顯示時間；每週另顯示複選星期；每月另顯示複選日期。 |
-| `update_time` | `07:00:00` | 舊版相容值，只供既有 scalar 排程使用。 |
-| `update_weekday` | `monday` | 舊版相容值，只供既有每週 scalar 排程使用。 |
-| `update_month_day` | `1` | 舊版相容值，只供既有每月 scalar 排程使用。 |
 | `enable_morning_summary` | `true` | 啟用早晨摘要。 |
 | `morning_summary_time` | `07:12:00` | 關閉摘要時忽略。 |
 | `enable_pre_class_reminders` | `true` | 啟用 heartbeat 課前提醒。 |
@@ -156,7 +261,7 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 | `pre_class_refresh_minutes` | `60` | 課前重新同步分鐘數。 |
 | `verify_before_each_reminder` | `true` | 每段播放前再更新確認；失敗跳過受影響提醒。 |
 
-Input key 會保持向後相容；未來新增選填 input 必有 default。
+未來新增選填 input 時會提供 default，避免既有 automation 因缺少新欄位而無法載入。
 
 ## 每天／每週／每月更新規則
 
@@ -171,9 +276,21 @@ Input key 會保持向後相容；未來新增選填 input 必有 default。
 
 定期強制更新只會額外要求 Remote Calendar 更新，無法降低 Remote Calendar integration 自身的內建更新頻率。
 
-### 既有 automation 升級
+### 從舊版排程升級
 
-`update_frequency` input ID 保持不變。既有 automation 若仍儲存舊版 `daily`、`weekly`、`monthly` scalar，會繼續使用原本的 `update_time`、`update_weekday`、`update_month_day`，不會默默換成不同排程。這些舊欄位收在預設折疊的「舊版排程相容設定」，新使用者只需使用條件式「更新排程」。升級後若開啟 automation 編輯器，請重新選擇一次「更新排程」以將表單值轉成新結構；在重新選擇以前，執行時仍保持舊排程。
+本版已移除舊的 `update_time`、`update_weekday`、`update_month_day` inputs 與 scalar 排程 runtime。依 Home Assistant 2026.1.0 官方 source，[Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) 允許 automation 中存在額外的已儲存 input key，而 [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) 只檢查新版 Blueprint 是否缺少必要 input；因此這三個 stale keys 會被忽略，不會單獨造成 automation 或 Blueprint 載入失敗。
+
+舊 automation 內的 `update_frequency: daily`、`weekly` 或 `monthly` scalar 無法確認新版星期／日期選擇，所以本版會 fail-safe 停止**定期強制更新**，不會偷偷改成星期一、每天 07:00 或其他預設。早晨摘要、課前重新同步、提醒、verification 與 TTS 仍是獨立流程。
+
+更新 Blueprint 後請：
+
+1. 開啟既有 automation。
+2. 展開「定期強制更新」。
+3. 在「更新排程」重新選擇「每天／每週／每月」。
+4. 重新設定時間，以及需要的星期或日期。
+5. 儲存 automation。
+
+不需要為 stale inputs 手動編輯 YAML；只要重新儲存結構化「更新排程」。
 
 ## 早晨提醒
 
@@ -245,7 +362,7 @@ Linux/macOS 用 `.venv/bin/python`。實機步驟見 [docs/MANUAL_TEST_CHECKLIST
 
 ## 更新 Blueprint
 
-到「設定 → 自動化與場景 → Blueprint」，開啟選單並選「重新匯入 Blueprint」。先看版本資訊；重匯會覆蓋 Blueprint，但保留相容 inputs。
+到「設定 → 自動化與場景 → Blueprint」，開啟選單並選「重新匯入 Blueprint」。重匯後，使用舊 scalar 排程的 automation 請依「從舊版排程升級」重新選擇結構化排程。
 
 ## 已知限制
 

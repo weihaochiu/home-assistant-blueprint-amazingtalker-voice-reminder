@@ -1,6 +1,6 @@
 # AmazingTalker 課程語音提醒實機測試清單
 
-用於真實 Home Assistant、Google Translate TTS、HomePod Mini、Music Assistant 及其他播放器。不可把真實 ICS URL、學員姓名、家庭 entity ID、Home Assistant URL、IP 或 access token 放到 Issue、截圖或公開紀錄。
+用於真實 Home Assistant、Google Translate TTS、HomePod Mini、Music Assistant 及其他播放器。不可把真實 AmazingTalker Calendar URL、學員姓名、家庭 entity ID、Home Assistant URL、IP 或 access token 放到 Issue、截圖或公開紀錄。
 
 ## 測試前準備
 
@@ -11,10 +11,19 @@
 
 ## 建立測試 Remote Calendar
 
-1. 到「設定 → 裝置與服務 → 新增整合」。
-2. 新增 `Remote Calendar`，使用測試專用 AmazingTalker ICS 私人 URL，不填帳密。
-3. 每位測試學員各建一筆，在 Calendar dashboard 確認事件已載入。
-4. ICS URL 是私人讀取金鑰；測試後仍不可提交到 Git、Issue、公開論壇或未遮蔽截圖。
+1. 登入 AmazingTalker，開啟 **Account Settings → Connect to Calendar → Copy URL**。
+2. 到 Home Assistant「設定 → 裝置與服務 → 新增整合」。
+3. 新增 `Remote Calendar`，貼上測試專用 AmazingTalker Calendar 私人 URL，保持 SSL verification 開啟。
+4. AmazingTalker URL 一般不需要 Username / Password；不可填入 AmazingTalker 登入帳密。
+5. 每位測試學員各建一筆，在 Calendar dashboard 確認事件已載入。
+6. Calendar URL 是私人讀取網址；測試後仍不可提交到 Git、Issue、公開論壇或未遮蔽截圖。
+
+- [ ] 已由 AmazingTalker **Copy URL** 取得 Calendar URL。
+- [ ] Remote Calendar 建立成功。
+- [ ] 已建立可用的 `calendar.*` entity。
+- [ ] Calendar dashboard 可看到近期課程。
+- [ ] Blueprint 的「AmazingTalker 行事曆」可選到該 `calendar.*` entity。
+- [ ] 實際 TTS 可由選定的播放器播放。
 
 ## 建立暫時測試課程
 
@@ -22,7 +31,7 @@
 - [ ] 兩位學員同時間開始；同一學員同日兩堂；另建一個全天事件。
 - [ ] 手動執行一次 `homeassistant.update_entity`，再從 Calendar dashboard 確認載入。
 
-AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 ICS server；不可在公開 server 放真實姓名/token。
+AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 Calendar server；不可在公開 server 放真實姓名/token。
 
 ## 先用短時間驗證
 
@@ -88,7 +97,10 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 IC
 
 ## 定期更新與月底
 
+- [ ] UI 不再出現「舊版排程相容設定」。
+- [ ] 「定期強制更新」後下一個主要 section 直接是「當天早晨課程播報」。
 - [ ] choose selector 在每天只顯示時間、每週只顯示時間與星期、每月只顯示時間與日期。
+- [ ] 每天排程在設定的本地時間正常更新。
 - [ ] 每週可同時選星期一、三、五，且只在選取日的正確本地時間更新。
 - [ ] 每月可同時選 1、15、30，且只在選取日期的正確本地時間更新。
 - [ ] 平年二月 29/30/31 fallback 到 28；閏年到 29；小月 31 到 30。
@@ -101,7 +113,7 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 IC
 
 - [ ] 恢復正式 refresh/offset/早晨/更新時間。
 - [ ] 刪除暫時課程與不用的 Remote Calendar。
-- [ ] 撤銷/輪替測試 ICS 金鑰。
+- [ ] 撤銷/輪替測試 Calendar URL token。
 - [ ] 刪除含私人資料的 trace、下載檔與未遮蔽截圖。
 - [ ] 最後檢查 dashboard/trace 無殘留待觸發測試。
 
