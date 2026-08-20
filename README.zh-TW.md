@@ -2,6 +2,10 @@
 
 [English](README.md)
 
+**目前 Blueprint 版本：v0.4.0**
+
+**最低 Home Assistant：2026.1.0**
+
 [![開啟 Home Assistant 並匯入此 Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fweihaochiu%2Fhome-assistant-blueprint-amazingtalker-voice-reminder%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fweihaochiu%2Famazingtalker_voice_reminder.yaml)
 
 這是 Home Assistant Automation Blueprint，可將任意數量學員的 AmazingTalker 行事曆合併成自然繁體中文早晨摘要與課前語音提醒。本專案是獨立社群作品，並非 AmazingTalker 官方專案，亦未獲 AmazingTalker 授權、背書或維護。
@@ -12,6 +16,8 @@
 - 每分鐘只讀 Remote Calendar coordinator 快取，不會每分鐘下載 AmazingTalker Calendar URL。
 - 每日、每週、每月額外強制更新與月底 fallback。
 - 一次播報當天所有非全天課程，支援一位學員多堂課。
+- 早晨 5 種開場與課前 5 種提醒語句可複選。
+- 選 1 個固定播放；選 2 個以上則每次實際播報純 random 一個。
 - 任意段課前提醒、課前重新同步及每段播放前 fail-closed 最後確認。
 - 優先以 ICS UID 確認；沒有 UID 時使用 calendar/start/end/summary。
 - 合併同時間課程及同一檢查時間的不同剩餘分鐘。
@@ -255,7 +261,9 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 | `update_frequency` | 每天 `07:00:00` | 結構化 choose selector 排程。每天只顯示時間；每週另顯示複選星期；每月另顯示複選日期。 |
 | `enable_morning_summary` | `true` | 啟用早晨摘要。 |
 | `morning_summary_time` | `07:12:00` | 關閉摘要時忽略。 |
+| `morning_intro_styles` | `morning_standard` | 選 1 個固定；複選時每次實際早晨播報純 random 一次。 |
 | `enable_pre_class_reminders` | `true` | 啟用 heartbeat 課前提醒。 |
+| `pre_class_message_styles` | `preclass_standard` | 選 1 個固定；複選時每次實際課前播報純 random 一次。 |
 | `reminder_offsets` | `30`、`10` | 任意段；執行時轉整數、去除無效/零/負數/重複並降冪排序，不改寫 UI。 |
 | `enable_pre_class_refresh` | `true` | 到刷新點時只更新含課程的 calendar。 |
 | `pre_class_refresh_minutes` | `60` | 課前重新同步分鐘數。 |
@@ -280,7 +288,7 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 
 本版已移除舊的 `update_time`、`update_weekday`、`update_month_day` inputs 與 scalar 排程 runtime。依 Home Assistant 2026.1.0 官方 source，[Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) 允許 automation 中存在額外的已儲存 input key，而 [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) 只檢查新版 Blueprint 是否缺少必要 input；因此這三個 stale keys 會被忽略，不會單獨造成 automation 或 Blueprint 載入失敗。
 
-舊 automation 內的 `update_frequency: daily`、`weekly` 或 `monthly` scalar 無法確認新版星期／日期選擇，所以本版會 fail-safe 停止**定期強制更新**，不會偷偷改成星期一、每天 07:00 或其他預設。早晨摘要、課前重新同步、提醒、verification 與 TTS 仍是獨立流程。
+舊 automation 內的 `update_frequency: daily`、`weekly` 或 `monthly` scalar 無法確認新版星期／日期選擇，所以本版會 fail-safe 停止**定期強制更新**，不會偷偷改成星期一、每天 07:00 或其他預設。若定期強制更新仍啟用且 scalar 尚未遷移，v0.4.0 會在本地時間 `00:00` 寫入 `system_log` migration warning，正常情況每天最多一次。早晨摘要、課前重新同步、提醒、verification 與 TTS 仍是獨立流程。
 
 更新 Blueprint 後請：
 
@@ -298,7 +306,33 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 
 時間會念成 `08:00` →「早上8點」、`13:30` →「下午1點30分」、`20:00` →「晚上8點」。沒有課程時，不設定音量、不播放 TTS。
 
+「早晨開場語句」內建 5 種：
+
+| ID | UI 名稱 | 實際播報文字 |
+| --- | --- | --- |
+| `morning_standard` | 標準早安提醒 | 早安提醒，今天有 AmazingTalker 課程。 |
+| `morning_schedule` | 今日課程安排 | 早安，今天的 AmazingTalker 課程安排如下。 |
+| `morning_today_courses` | 今日課程時間 | 今天有 AmazingTalker 課程，以下是今天的課程時間。 |
+| `morning_new_day` | 新的一天 | 新的一天開始了，今天的 AmazingTalker 課程安排如下。 |
+| `morning_brief` | 簡短早安提醒 | 早安，以下是今天的 AmazingTalker 課程時間。 |
+
+選 1 個時固定使用；選 2 個以上時，每次真正需要早晨 TTS 才純 random 一次，允許連續兩次抽到同一句。只有開場句會改變，後方學員與課程時間仍由 Calendar 動態產生。當天沒有 timed lesson 時，不抽語句、不調音量、不播放。
+
 ## 自訂提醒、重新同步與取消確認
+
+「課前提醒語句」內建 5 種：
+
+| ID | UI 名稱 | 句型 |
+| --- | --- | --- |
+| `preclass_standard` | 標準提醒 | 提醒您，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
+| `preclass_material` | 教材提醒 | 記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。 |
+| `preclass_coming` | 課程即將開始 | 課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。 |
+| `preclass_ready` | 準備上課 | 準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
+| `preclass_short` | 簡短提醒 | 別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。 |
+
+選 1 個時固定使用；選 2 個以上時，每次最後確認成功且真正需要播報時純 random 一次，允許連續抽到同一句。同一 playback 合併的所有 reminder offset 使用同一 style；`{names}` 與 `{minutes}` 仍由系統動態代入。
+
+`names` 來自 `spoken_name`，用來區分 AmazingTalker Calendar／帳號。v0.4.0 不從 event summary 解析老師名稱；summary 仍保留於取消／改期確認所需的 fallback event identity。
 
 Home Assistant 無法從任意長度 input 動態產生 calendar triggers，因此使用每分鐘 heartbeat。每次開始保存 `check_time` 與固定比較分鐘；舊 parallel 執行不會延遲後改用新的 `now()`。
 
@@ -364,6 +398,15 @@ Linux/macOS 用 `.venv/bin/python`。實機步驟見 [docs/MANUAL_TEST_CHECKLIST
 
 到「設定 → 自動化與場景 → Blueprint」，開啟選單並選「重新匯入 Blueprint」。重匯後，使用舊 scalar 排程的 automation 請依「從舊版排程升級」重新選擇結構化排程。
 
+### 如何確認 Blueprint 是否已更新
+
+重新匯入後開啟 automation 編輯頁，確認同時看得到：
+
+- Blueprint 標題：`AmazingTalker 多學員課程語音提醒 · v0.4.0`
+- 第一個 section description：`目前 Blueprint：v0.4.0`
+
+若仍顯示舊版，請到「設定（Settings）→ 自動化與場景（Automations & scenes）→ Blueprint」，開啟 AmazingTalker Blueprint 的三點選單，選擇「重新匯入 Blueprint（Re-import blueprint）」，再重新開啟 automation。這是 Home Assistant 官方文件列出的社群 Blueprint 更新方式。
+
 ## 已知限制
 
 - 早上快取存在、之後取消的課程，可在成功課前刷新/最後確認後停止提醒。
@@ -380,4 +423,4 @@ Linux/macOS 用 `.venv/bin/python`。實機步驟見 [docs/MANUAL_TEST_CHECKLIST
 
 ## 版本與 License
 
-開發版本 `0.1.0`（Unreleased），見 [CHANGELOG.md](CHANGELOG.md)。[MIT](LICENSE) © 2026 weihaochiu。
+目前 Blueprint 版本：`v0.4.0`，見 [CHANGELOG.md](CHANGELOG.md)。[MIT](LICENSE) © 2026 weihaochiu。

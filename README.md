@@ -2,6 +2,10 @@
 
 [繁體中文](README.zh-TW.md)
 
+**Current Blueprint version: v0.4.0**
+
+**Minimum Home Assistant: 2026.1.0**
+
 [![Open your Home Assistant instance and import this Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fweihaochiu%2Fhome-assistant-blueprint-amazingtalker-voice-reminder%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fweihaochiu%2Famazingtalker_voice_reminder.yaml)
 
 A Home Assistant Automation Blueprint that combines any number of AmazingTalker learner calendars into natural Traditional Chinese morning summaries and pre-class voice reminders.
@@ -14,6 +18,8 @@ This is an independent community project. It is not an official AmazingTalker pr
 - Read each Remote Calendar coordinator cache every minute without downloading the AmazingTalker Calendar URL every minute.
 - Optional daily, weekly, or monthly forced refresh with end-of-month fallback.
 - Morning summary covering every timed lesson for every learner; all-day events are ignored.
+- Five selectable morning openings and five selectable pre-class reminder styles.
+- One selected phrase stays fixed; multiple selections use pure random per actual playback.
 - Any number of normalized pre-class reminder offsets, targeted refresh, and fail-closed final verification.
 - Match by ICS UID, with calendar/start/end/summary fallback when UID is absent.
 - Merge simultaneous lessons and different offsets into one playback request with natural sentences.
@@ -257,7 +263,9 @@ Then select **Create automation**, add at least one learner and player, choose a
 | `update_frequency` | Daily at `07:00:00` | Structured choose-selector schedule. Daily shows time only; weekly adds multiple weekdays; monthly adds multiple month days. |
 | `enable_morning_summary` | `true` | Enable the local-day morning summary. |
 | `morning_summary_time` | `07:12:00` | Ignored when morning summary is disabled. |
+| `morning_intro_styles` | `morning_standard` | One opening stays fixed; multiple selected openings use pure random once per actual morning playback. |
 | `enable_pre_class_reminders` | `true` | Enable heartbeat-based reminders. |
+| `pre_class_message_styles` | `preclass_standard` | One style stays fixed; multiple selected styles use pure random once per actual reminder playback. |
 | `reminder_offsets` | `30`, `10` | Repeatable minutes-before entries; runtime values become positive unique integers sorted descending without rewriting UI data. |
 | `enable_pre_class_refresh` | `true` | Refresh only calendars whose cached lesson reaches the refresh point. |
 | `pre_class_refresh_minutes` | `60` | Minutes before class for targeted refresh. |
@@ -281,7 +289,7 @@ The scheduled forced refresh only makes an additional Remote Calendar update req
 
 This release removes the old `update_time`, `update_weekday`, and `update_month_day` inputs and scalar schedule runtime. The official Home Assistant 2026.1.0 [Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) permits extra stored input keys, while [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) only rejects missing inputs declared by the new Blueprint. Those three stale keys are therefore ignored and do not by themselves invalidate the automation or Blueprint.
 
-An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The new runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
+An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. While scheduled refresh is enabled and the scalar remains, v0.4.0 writes a migration warning to `system_log` at local `00:00`, normally at most once per day. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
 
 After updating the Blueprint:
 
@@ -297,7 +305,33 @@ There is no need to remove stale inputs by manually editing YAML; save the struc
 
 At the selected local time, `calendar.get_events` queries local 00:00 through the next local 00:00. Timed events are sorted by start and learner; all lessons are spoken. Name fallback is non-blank `spoken_name`, calendar `friendly_name`, then entity ID without `calendar.`. Times are natural: `08:00` → `早上8點`, `13:30` → `下午1點30分`, `20:00` → `晚上8點`. With no lessons, volume and TTS are untouched.
 
+The morning opening selector includes these built-in phrases:
+
+| ID | UI label | Spoken text |
+| --- | --- | --- |
+| `morning_standard` | 標準早安提醒 | 早安提醒，今天有 AmazingTalker 課程。 |
+| `morning_schedule` | 今日課程安排 | 早安，今天的 AmazingTalker 課程安排如下。 |
+| `morning_today_courses` | 今日課程時間 | 今天有 AmazingTalker 課程，以下是今天的課程時間。 |
+| `morning_new_day` | 新的一天 | 新的一天開始了，今天的 AmazingTalker 課程安排如下。 |
+| `morning_brief` | 簡短早安提醒 | 早安，以下是今天的 AmazingTalker 課程時間。 |
+
+Selecting one phrase keeps it fixed. Selecting two or more uses pure random once per actual morning playback; the same phrase may be selected on consecutive playbacks. Only the opening changes—the dynamic learner and course-time text still comes from the calendar. With no timed lessons, the Blueprint does not select or play an opening.
+
 ## Pre-class reminders and cancellation checks
+
+The pre-class selector includes these built-in sentence styles:
+
+| ID | UI label | Template |
+| --- | --- | --- |
+| `preclass_standard` | 標準提醒 | 提醒您，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
+| `preclass_material` | 教材提醒 | 記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。 |
+| `preclass_coming` | 課程即將開始 | 課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。 |
+| `preclass_ready` | 準備上課 | 準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
+| `preclass_short` | 簡短提醒 | 別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。 |
+
+One selected style stays fixed. Two or more use pure random once after final verification for each actual playback; consecutive repeats are allowed. Every sentence in one merged playback uses the same selected style, while `{names}` and `{minutes}` remain dynamic.
+
+`names` comes from `spoken_name` and identifies the AmazingTalker Calendar/account. v0.4.0 does not parse a teacher name from the event summary. The summary remains part of the fallback event identity used for cancellation and reschedule verification.
 
 A one-minute heartbeat is required because Home Assistant cannot dynamically create calendar triggers from an arbitrary-length Blueprint input. Each run captures `check_time` and a fixed minute anchor, so a delayed older run never substitutes a new `now()`.
 
@@ -363,6 +397,15 @@ On Linux/macOS use `.venv/bin/python`. See [the Traditional Chinese manual check
 
 Open **Settings → Automations & scenes → Blueprints**, open this Blueprint's menu, and choose **Re-import Blueprint**. Automations with an old scalar schedule must then reselect the structured schedule as described under “Upgrading an old schedule.”
 
+### How to confirm that the Blueprint is updated
+
+After re-importing, open the automation editor and confirm both visible markers:
+
+- Blueprint title: `AmazingTalker 多學員課程語音提醒 · v0.4.0`
+- First section description: `目前 Blueprint：v0.4.0`
+
+If an older version is still shown, go to **Settings → Automations & scenes → Blueprints**, select the three-dot menu for the AmazingTalker Blueprint, choose **Re-import blueprint**, and then reopen the automation. Home Assistant documents this as the supported update path for imported community Blueprints.
+
 ## Known limitations
 
 - A morning-cached cancellation can be suppressed after a successful pre-class refresh or final verification.
@@ -379,4 +422,4 @@ Only official sources are used: [AmazingTalker calendar instructions](https://am
 
 ## Version and license
 
-Development version: `0.1.0` (Unreleased); see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.
+Current Blueprint version: `v0.4.0`; see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.

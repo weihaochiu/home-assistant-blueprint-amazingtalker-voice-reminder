@@ -23,11 +23,42 @@ BLUEPRINT_PATH = (
     / "weihaochiu"
     / "amazingtalker_voice_reminder.yaml"
 )
+VERSION_PATH = ROOT / "VERSION"
+VERSION = VERSION_PATH.read_text(encoding="utf-8").strip()
 SOURCE_URL = (
     "https://github.com/weihaochiu/"
     "home-assistant-blueprint-amazingtalker-voice-reminder/blob/main/"
     "blueprints/automation/weihaochiu/amazingtalker_voice_reminder.yaml"
 )
+
+MORNING_STYLE_IDS = [
+    "morning_standard",
+    "morning_schedule",
+    "morning_today_courses",
+    "morning_new_day",
+    "morning_brief",
+]
+PRECLASS_STYLE_IDS = [
+    "preclass_standard",
+    "preclass_material",
+    "preclass_coming",
+    "preclass_ready",
+    "preclass_short",
+]
+MORNING_PHRASES = {
+    "morning_standard": "早安提醒，今天有 AmazingTalker 課程。",
+    "morning_schedule": "早安，今天的 AmazingTalker 課程安排如下。",
+    "morning_today_courses": "今天有 AmazingTalker 課程，以下是今天的課程時間。",
+    "morning_new_day": "新的一天開始了，今天的 AmazingTalker 課程安排如下。",
+    "morning_brief": "早安，以下是今天的 AmazingTalker 課程時間。",
+}
+PRECLASS_PHRASES = {
+    "preclass_standard": "提醒您，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。",
+    "preclass_material": "記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。",
+    "preclass_coming": "課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。",
+    "preclass_ready": "準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。",
+    "preclass_short": "別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。",
+}
 
 
 class InputRef(str):
@@ -74,6 +105,95 @@ def walk(value):
     elif isinstance(value, list):
         for item in value:
             yield from walk(item)
+
+
+def find_variable_template(value, name: str) -> str:
+    if isinstance(value, dict):
+        variables = value.get("variables")
+        if isinstance(variables, dict) and name in variables:
+            return variables[name]
+        for item in value.values():
+            try:
+                return find_variable_template(item, name)
+            except KeyError:
+                pass
+    elif isinstance(value, list):
+        for item in value:
+            try:
+                return find_variable_template(item, name)
+            except KeyError:
+                pass
+    raise KeyError(name)
+
+
+def render_native(template: str, context: dict | None = None, chooser=None):
+    environment = NativeEnvironment(autoescape=False)
+    if chooser is not None:
+        environment.filters["random"] = chooser
+    return environment.from_string(template).render(context or {})
+
+
+def render_global_phrase_variables(blueprint: dict, **inputs) -> dict:
+    variables = blueprint["variables"]
+    context = dict(inputs)
+    for name in (
+        "morning_phrase_map",
+        "selected_morning_styles",
+        "pre_class_phrase_map",
+        "selected_pre_class_styles",
+    ):
+        context[name] = render_native(variables[name], context)
+    return context
+
+
+def render_actual_morning_message(
+    blueprint: dict,
+    selected_styles,
+    events: list[dict],
+    *,
+    chooser=None,
+) -> str:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=selected_styles,
+        pre_class_message_styles_input=["preclass_standard"],
+    )
+    context.update(
+        morning_agenda={"calendar.test": {"events": events}},
+        learners_input=[
+            {"calendar_entity": "calendar.test", "spoken_name": "Grace"}
+        ],
+        state_attr=lambda _entity, _attribute: None,
+        as_datetime=datetime.fromisoformat,
+        as_local=lambda value: value,
+    )
+    selected = chooser or (lambda values: values[0])
+    rendered = render_native(
+        find_variable_template(blueprint["actions"], "morning_message"),
+        context,
+        selected,
+    )
+    return str(rendered or "").strip()
+
+
+def render_actual_reminder_message(
+    blueprint: dict,
+    selected_styles,
+    candidates: list[dict],
+    chooser,
+) -> str:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=["morning_standard"],
+        pre_class_message_styles_input=selected_styles,
+    )
+    context["confirmed_candidates"] = candidates
+    rendered = render_native(
+        find_variable_template(blueprint["actions"], "reminder_message"),
+        context,
+        chooser,
+    )
+    return str(rendered or "").strip()
 
 
 def normalize_offsets(values) -> list[int]:
@@ -226,7 +346,15 @@ def still_exists(entity: str, original: dict, fresh_events: list[dict]) -> bool:
     return False
 
 
-def reminder_message(candidates: list[dict]) -> str:
+def format_names(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    return "、".join(names[:-1]) + " 和 " + names[-1]
+
+
+def reminder_message(
+    candidates: list[dict], style: str = "preclass_standard"
+) -> str:
     grouped: dict[int, list[str]] = defaultdict(list)
     seen_keys = set()
     for candidate in candidates:
@@ -240,9 +368,10 @@ def reminder_message(candidates: list[dict]) -> str:
     sentences = []
     for offset in sorted(grouped, reverse=True):
         names = grouped[offset]
-        joined = names[0] if len(names) == 1 else "、".join(names[:-1]) + " 和 " + names[-1]
         sentences.append(
-            f"提醒您，{joined} 的 AmazingTalker 課程將在{offset}分鐘後開始。"
+            PRECLASS_PHRASES[style].format(
+                names=format_names(names), minutes=offset
+            )
         )
     return "".join(sentences)
 
@@ -277,11 +406,24 @@ def player_plan(
 
 def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
     metadata = blueprint["blueprint"]
-    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒"
+    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒 · v0.4.0"
     assert metadata["domain"] == "automation"
     assert metadata["author"] == "weihaochiu"
     assert metadata["source_url"] == SOURCE_URL
     assert metadata["homeassistant"]["min_version"] == "2026.1.0"
+
+
+def test_version_is_consistent_across_release_surfaces(blueprint: dict) -> None:
+    assert VERSION == "0.4.0"
+    displayed = f"v{VERSION}"
+    metadata = blueprint["blueprint"]
+    assert displayed in metadata["name"]
+    assert displayed in metadata["description"]
+    first_section = next(iter(metadata["input"].values()))
+    assert displayed in first_section["description"]
+    assert displayed in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert displayed in (ROOT / "README.zh-TW.md").read_text(encoding="utf-8")
+    assert displayed in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
 def test_all_input_references_are_declared_and_used(blueprint: dict) -> None:
@@ -366,6 +508,32 @@ def test_choose_schedule_selector_schema_and_conditional_fields(blueprint: dict)
     }
 
 
+def test_phrase_selector_schemas_defaults_and_ids(blueprint: dict) -> None:
+    inputs = flatten_inputs(blueprint["blueprint"]["input"])
+    cases = (
+        ("morning_intro_styles", "morning_standard", MORNING_STYLE_IDS),
+        ("pre_class_message_styles", "preclass_standard", PRECLASS_STYLE_IDS),
+    )
+    for input_id, default_id, expected_ids in cases:
+        definition = inputs[input_id]
+        selector = definition["selector"]["select"]
+        assert selector["multiple"] is True
+        assert selector["custom_value"] is False
+        assert selector["mode"] == "dropdown"
+        assert definition["default"] == [default_id]
+        assert [option["value"] for option in selector["options"]] == expected_ids
+
+
+def test_phrase_maps_are_centralized_and_exact(blueprint: dict) -> None:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=["morning_standard"],
+        pre_class_message_styles_input=["preclass_standard"],
+    )
+    assert context["morning_phrase_map"] == MORNING_PHRASES
+    assert context["pre_class_phrase_map"] == PRECLASS_PHRASES
+
+
 def test_legacy_schedule_section_inputs_and_runtime_are_absent(
     blueprint: dict, blueprint_text: str
 ) -> None:
@@ -402,8 +570,10 @@ def test_scheduled_refresh_is_independent_from_reminder_heartbeat(
     blueprint: dict, blueprint_text: str
 ) -> None:
     scheduled_if = blueprint["actions"][0]
-    reminder_choose = blueprint["actions"][1]
+    legacy_warning_if = blueprint["actions"][1]
+    reminder_choose = blueprint["actions"][2]
     assert "if" in scheduled_if and "then" in scheduled_if
+    assert "if" in legacy_warning_if and "then" in legacy_warning_if
     assert "choose" in reminder_choose
     assert "本分鐘一次強制更新所有選取的行事曆" in blueprint_text
     assert "每分鐘 heartbeat 課前流程" in blueprint_text
@@ -652,6 +822,74 @@ def test_actual_blueprint_schedule_templates_fail_safe(
     assert not due
 
 
+@pytest.mark.parametrize("schedule", ["daily", "weekly", "monthly"])
+def test_legacy_scalar_schedule_detection_is_exact(
+    blueprint: dict, schedule
+) -> None:
+    detected = render_native(
+        blueprint["variables"]["legacy_schedule_detected"],
+        {"update_frequency_input": schedule},
+    )
+    assert detected is True
+
+
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        choose_schedule("每天", update_time="07:00:00"),
+        None,
+        [],
+        "garbage",
+        {"active_choice": "每週", "每週": "malformed"},
+    ],
+)
+def test_nonlegacy_schedule_values_do_not_raise_migration_warning(
+    blueprint: dict, schedule
+) -> None:
+    detected = render_native(
+        blueprint["variables"]["legacy_schedule_detected"],
+        {"update_frequency_input": schedule},
+    )
+    assert detected is False
+
+
+def test_legacy_warning_is_rate_limited_and_nonblocking(
+    blueprint: dict, blueprint_text: str
+) -> None:
+    warning_if = blueprint["actions"][1]
+    conditions = warning_if["if"]
+    assert conditions[0] == {"condition": "trigger", "id": "heartbeat"}
+    assert "enable_scheduled_update_input" in conditions[1]["value_template"]
+    assert "legacy_schedule_detected" in conditions[2]["value_template"]
+    assert "strftime('%H:%M') == '00:00'" in conditions[3]["value_template"]
+    warning_action = warning_if["then"][0]
+    assert warning_action["action"] == "system_log.write"
+    assert warning_action["data"]["level"] == "warning"
+    assert warning_action["data"]["logger"] == (
+        "blueprints.weihaochiu.amazingtalker_voice_reminder"
+    )
+    assert warning_action["continue_on_error"] is True
+    assert blueprint["actions"][2].get("choose")
+    assert blueprint_text.count("legacy scheduled-refresh") == 1
+    midnight_template = conditions[3]["value_template"]
+    base_context = {
+        "as_datetime": lambda value: datetime.fromtimestamp(
+            float(value), timezone.utc
+        ),
+        "as_local": lambda value: value,
+    }
+    at_midnight = {
+        **base_context,
+        "check_time": datetime(2026, 8, 21, tzinfo=timezone.utc).timestamp(),
+    }
+    after_midnight = {
+        **base_context,
+        "check_time": datetime(2026, 8, 21, 0, 1, tzinfo=timezone.utc).timestamp(),
+    }
+    assert render_native(midnight_template, at_midnight) is True
+    assert render_native(midnight_template, after_midnight) is False
+
+
 @pytest.mark.parametrize(
     ("hour", "minute", "expected"),
     [
@@ -665,6 +903,269 @@ def test_actual_blueprint_schedule_templates_fail_safe(
 )
 def test_natural_traditional_chinese_time(hour, minute, expected) -> None:
     assert spoken_time(datetime(2026, 8, 18, hour, minute)) == expected
+
+
+@pytest.mark.parametrize(
+    ("input_value", "morning_expected", "preclass_expected"),
+    [
+        ([], ["morning_standard"], ["preclass_standard"]),
+        (["unknown"], ["morning_standard"], ["preclass_standard"]),
+        ([None], ["morning_standard"], ["preclass_standard"]),
+    ],
+)
+def test_invalid_or_empty_phrase_styles_fall_back_to_standard(
+    blueprint: dict, input_value, morning_expected, preclass_expected
+) -> None:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=input_value,
+        pre_class_message_styles_input=input_value,
+    )
+    assert context["selected_morning_styles"] == morning_expected
+    assert context["selected_pre_class_styles"] == preclass_expected
+
+
+def test_phrase_style_normalization_filters_unknown_ids_and_duplicates(
+    blueprint: dict,
+) -> None:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=[
+            "bad",
+            "morning_brief",
+            "morning_brief",
+            "morning_schedule",
+        ],
+        pre_class_message_styles_input=[
+            "bad",
+            "preclass_short",
+            "preclass_short",
+            "preclass_material",
+        ],
+    )
+    assert context["selected_morning_styles"] == [
+        "morning_brief",
+        "morning_schedule",
+    ]
+    assert context["selected_pre_class_styles"] == [
+        "preclass_short",
+        "preclass_material",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("style", "expected"),
+    [
+        (
+            "preclass_standard",
+            "提醒您，Grace 的 AmazingTalker 課程將在30分鐘後開始。",
+        ),
+        (
+            "preclass_material",
+            "記得準備教材，再過30分鐘，Grace 的 AmazingTalker 課程就要開始了。",
+        ),
+        (
+            "preclass_coming",
+            "課程提醒，Grace 的 AmazingTalker 課程再過30分鐘就要開始了。",
+        ),
+        (
+            "preclass_ready",
+            "準備上課囉，Grace 的 AmazingTalker 課程將在30分鐘後開始。",
+        ),
+        (
+            "preclass_short",
+            "別忘了，30分鐘後有Grace 的 AmazingTalker 課程。",
+        ),
+    ],
+)
+def test_all_preclass_phrase_outputs(blueprint: dict, style, expected) -> None:
+    candidates = [{"identity": "u1", "remaining": 30, "learner": "Grace"}]
+    actual = render_actual_reminder_message(
+        blueprint, [style], candidates, lambda values: values[0]
+    )
+    assert actual == expected
+
+
+def test_single_preclass_selection_is_always_fixed(blueprint: dict) -> None:
+    candidates = [{"identity": "u1", "remaining": 30, "learner": "Grace"}]
+    results = {
+        render_actual_reminder_message(
+            blueprint,
+            ["preclass_material"],
+            candidates,
+            lambda values: values[0],
+        )
+        for _ in range(5)
+    }
+    assert results == {
+        "記得準備教材，再過30分鐘，Grace 的 AmazingTalker 課程就要開始了。"
+    }
+
+
+def test_multiple_preclass_selection_stays_inside_selected_set(
+    blueprint: dict,
+) -> None:
+    selected = ["preclass_standard", "preclass_material", "preclass_short"]
+    candidates = [{"identity": "u1", "remaining": 30, "learner": "Grace"}]
+    expected = {
+        PRECLASS_PHRASES[style].format(names="Grace", minutes=30)
+        for style in selected
+    }
+    results = {
+        render_actual_reminder_message(
+            blueprint,
+            selected,
+            candidates,
+            lambda values, index=index: values[index],
+        )
+        for index in range(len(selected))
+    }
+    assert results == expected
+
+
+def test_pure_random_allows_consecutive_repeat(
+    blueprint: dict, blueprint_text: str
+) -> None:
+    candidates = [{"identity": "u1", "remaining": 30, "learner": "Grace"}]
+    selected = ["preclass_standard", "preclass_short"]
+    first = render_actual_reminder_message(
+        blueprint, selected, candidates, lambda values: values[0]
+    )
+    second = render_actual_reminder_message(
+        blueprint, selected, candidates, lambda values: values[0]
+    )
+    assert first == second
+    assert "last_phrase" not in blueprint_text
+    assert "shuffle" not in blueprint_text
+    assert "selected_pre_class_styles | random" in blueprint_text
+    assert "selected_morning_styles | random" in blueprint_text
+
+
+def test_same_preclass_style_is_used_for_every_offset_in_one_playback(
+    blueprint: dict,
+) -> None:
+    calls = []
+
+    def choose_short(values):
+        calls.append(list(values))
+        return "preclass_short"
+
+    candidates = [
+        {"identity": "u1", "remaining": 30, "learner": "Grace"},
+        {"identity": "u2", "remaining": 10, "learner": "Amy"},
+    ]
+    message = render_actual_reminder_message(
+        blueprint,
+        ["preclass_standard", "preclass_material", "preclass_short"],
+        candidates,
+        choose_short,
+    )
+    assert len(calls) == 1
+    assert message == (
+        "別忘了，30分鐘後有Grace 的 AmazingTalker 課程。"
+        "別忘了，10分鐘後有Amy 的 AmazingTalker 課程。"
+    )
+
+
+def test_multi_learner_name_formatting_is_shared_across_phrases() -> None:
+    two = [
+        {"identity": "u1", "remaining": 30, "learner": "Grace"},
+        {"identity": "u2", "remaining": 30, "learner": "Amy"},
+    ]
+    three = two + [
+        {"identity": "u3", "remaining": 30, "learner": "Kevin"}
+    ]
+    assert reminder_message(two, "preclass_material") == (
+        "記得準備教材，再過30分鐘，Grace 和 Amy 的 AmazingTalker 課程就要開始了。"
+    )
+    assert reminder_message(three, "preclass_coming") == (
+        "課程提醒，Grace、Amy 和 Kevin 的 AmazingTalker 課程再過30分鐘就要開始了。"
+    )
+
+
+@pytest.mark.parametrize(
+    ("style", "opening"),
+    [
+        ("morning_standard", MORNING_PHRASES["morning_standard"]),
+        ("morning_schedule", MORNING_PHRASES["morning_schedule"]),
+        ("morning_today_courses", MORNING_PHRASES["morning_today_courses"]),
+        ("morning_new_day", MORNING_PHRASES["morning_new_day"]),
+        ("morning_brief", MORNING_PHRASES["morning_brief"]),
+    ],
+)
+def test_morning_opening_changes_without_changing_course_text(
+    blueprint: dict, style, opening
+) -> None:
+    message = render_actual_morning_message(
+        blueprint,
+        [style],
+        [{"start": "2026-08-21T20:00:00+08:00"}],
+    )
+    assert message == f"{opening}Grace 的課程時間是晚上8點。"
+
+
+def test_morning_default_and_invalid_selection_use_standard(
+    blueprint: dict,
+) -> None:
+    event = [{"start": "2026-08-21T20:00:00+08:00"}]
+    expected = "早安提醒，今天有 AmazingTalker 課程。Grace 的課程時間是晚上8點。"
+    assert render_actual_morning_message(blueprint, ["morning_standard"], event) == expected
+    assert render_actual_morning_message(blueprint, [], event) == expected
+    assert render_actual_morning_message(blueprint, ["unknown"], event) == expected
+
+
+def test_morning_multi_selection_randoms_once_per_playback(
+    blueprint: dict,
+) -> None:
+    calls = []
+
+    def choose_schedule(values):
+        calls.append(list(values))
+        return "morning_schedule"
+
+    selected = ["morning_standard", "morning_schedule", "morning_new_day"]
+    events = [
+        {"start": "2026-08-21T20:00:00+08:00"},
+        {"start": "2026-08-21T21:30:00+08:00"},
+    ]
+    first = render_actual_morning_message(
+        blueprint, selected, events, chooser=choose_schedule
+    )
+    second = render_actual_morning_message(
+        blueprint, selected, events, chooser=choose_schedule
+    )
+    assert len(calls) == 2
+    assert all(call == selected for call in calls)
+    assert first == second
+    assert first == (
+        "早安，今天的 AmazingTalker 課程安排如下。"
+        "Grace 的課程時間是晚上8點、晚上9點30分。"
+    )
+
+
+def test_morning_no_course_does_not_create_an_opening_or_reach_playback(
+    blueprint: dict,
+) -> None:
+    calls = []
+
+    def chooser(values):
+        calls.append(list(values))
+        return values[0]
+
+    assert render_actual_morning_message(blueprint, ["morning_standard"], [], chooser=chooser) == ""
+    assert calls == []
+    morning_sequence = blueprint["actions"][2]["choose"][0]["sequence"]
+    no_course_index = next(
+        index
+        for index, action in enumerate(morning_sequence)
+        if action.get("alias") == "沒有課程時不改音量也不播放"
+    )
+    playback_index = next(
+        index
+        for index, action in enumerate(morning_sequence)
+        if action.get("alias") == "播放早晨摘要"
+    )
+    assert no_course_index < playback_index
 
 
 def test_one_two_and_many_calendars_fixture() -> None:
@@ -743,6 +1244,15 @@ def test_fallback_identity_without_uid() -> None:
     assert not still_exists(
         "calendar.amazingtalker_student_1", original, [{**original, "summary": "Moved"}]
     )
+
+
+def test_teacher_parsing_is_absent_but_summary_identity_is_retained(
+    blueprint_text: str,
+) -> None:
+    for identifier in ("teacher_name", "teacher_parser", "teacher_styles"):
+        assert identifier not in blueprint_text
+    assert "event.get('summary', '')" in blueprint_text
+    assert "original.summary" in blueprint_text
 
 
 def test_sixty_minute_refresh_and_each_reminder_verification_are_wired(blueprint_text: str) -> None:

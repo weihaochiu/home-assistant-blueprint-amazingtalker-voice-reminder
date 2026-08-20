@@ -1,6 +1,7 @@
 blueprint:
-  name: AmazingTalker 多學員課程語音提醒
+  name: AmazingTalker 多學員課程語音提醒 · v0.4.0
   description: >-
+    版本：v0.4.0。最低 Home Assistant：2026.1.0。
     AmazingTalker Multi-Learner Voice Reminder。從多個 Remote Calendar 行事曆讀取課程，
     提供每日摘要、可自訂課前提醒、取消/改期前重新確認、多播放器播報與個別音量恢復。
     本專案非 AmazingTalker 官方專案。AmazingTalker Calendar URL 是私人讀取網址，請勿公開。
@@ -15,8 +16,8 @@ blueprint:
       name: 學員行事曆
       icon: mdi:calendar-account
       description: >-
-        每位學員需先建立一個 Remote Calendar。至少新增一筆。Calendar URL 是私人讀取網址，
-        不可貼到 GitHub、Issue 或公開論壇。
+        目前 Blueprint：v0.4.0。每位學員需先建立一個 Remote Calendar。至少新增一筆。
+        Calendar URL 是私人讀取網址，不可貼到 GitHub、Issue 或公開論壇。
       input:
         learners:
           name: 學員
@@ -230,6 +231,29 @@ blueprint:
           default: "07:12:00"
           selector:
             time:
+        morning_intro_styles:
+          name: 早晨開場語句
+          description: >-
+            可複選。選 1 個時固定使用；選 2 個以上時，每次實際播報都從所選語句中
+            隨機選 1 個。純隨機，允許連續兩次抽到相同語句。
+          default:
+            - morning_standard
+          selector:
+            select:
+              multiple: true
+              custom_value: false
+              mode: dropdown
+              options:
+                - label: 標準早安提醒
+                  value: morning_standard
+                - label: 今日課程安排
+                  value: morning_schedule
+                - label: 今日課程時間
+                  value: morning_today_courses
+                - label: 新的一天
+                  value: morning_new_day
+                - label: 簡短早安提醒
+                  value: morning_brief
 
     reminder_section:
       name: 課前提醒與重新同步
@@ -241,6 +265,29 @@ blueprint:
           default: true
           selector:
             boolean:
+        pre_class_message_styles:
+          name: 課前提醒語句
+          description: >-
+            可複選。選 1 個固定使用；選 2 個以上時，每次實際課前播報從所選語句中
+            隨機選 1 個。純隨機，允許連續兩次抽到相同語句。
+          default:
+            - preclass_standard
+          selector:
+            select:
+              multiple: true
+              custom_value: false
+              mode: dropdown
+              options:
+                - label: 標準提醒
+                  value: preclass_standard
+                - label: 教材提醒
+                  value: preclass_material
+                - label: 課程即將開始
+                  value: preclass_coming
+                - label: 準備上課
+                  value: preclass_ready
+                - label: 簡短提醒
+                  value: preclass_short
         reminder_offsets:
           name: 課前提醒段數
           description: >-
@@ -312,7 +359,9 @@ variables:
   enable_scheduled_update_input: !input enable_scheduled_update
   update_frequency_input: !input update_frequency
   enable_morning_summary_input: !input enable_morning_summary
+  morning_intro_styles_input: !input morning_intro_styles
   enable_pre_class_reminders_input: !input enable_pre_class_reminders
+  pre_class_message_styles_input: !input pre_class_message_styles
   reminder_offsets_input: !input reminder_offsets
   enable_pre_class_refresh_input: !input enable_pre_class_refresh
   pre_class_refresh_minutes_input: !input pre_class_refresh_minutes
@@ -320,6 +369,57 @@ variables:
   # Numeric timestamps survive Home Assistant's cross-action template serialization.
   check_time: "{{ as_timestamp(now()) }}"
   check_minute: "{{ ((check_time | float(0)) // 60 * 60) | int }}"
+  legacy_schedule_detected: >-
+    {{- update_frequency_input is string
+        and update_frequency_input | lower | trim in ['daily', 'weekly', 'monthly'] -}}
+  morning_phrase_map: >-
+    {{- {
+      'morning_standard': '早安提醒，今天有 AmazingTalker 課程。',
+      'morning_schedule': '早安，今天的 AmazingTalker 課程安排如下。',
+      'morning_today_courses': '今天有 AmazingTalker 課程，以下是今天的課程時間。',
+      'morning_new_day': '新的一天開始了，今天的 AmazingTalker 課程安排如下。',
+      'morning_brief': '早安，以下是今天的 AmazingTalker 課程時間。'
+    } -}}
+  selected_morning_styles: >-
+    {%- set allowed = [
+      'morning_standard', 'morning_schedule', 'morning_today_courses',
+      'morning_new_day', 'morning_brief'
+    ] -%}
+    {%- set raw = morning_intro_styles_input -%}
+    {%- set values = [raw] if raw is string else
+      (raw if raw is iterable and raw is not mapping else []) -%}
+    {%- set ns = namespace(items=[]) -%}
+    {%- for item in values -%}
+      {%- set value = item | string | trim -%}
+      {%- if value in allowed and value not in ns.items -%}
+        {%- set ns.items = ns.items + [value] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{- ns.items if ns.items | count > 0 else ['morning_standard'] -}}
+  pre_class_phrase_map: >-
+    {{- {
+      'preclass_standard': '提醒您，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。',
+      'preclass_material': '記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。',
+      'preclass_coming': '課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。',
+      'preclass_ready': '準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。',
+      'preclass_short': '別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。'
+    } -}}
+  selected_pre_class_styles: >-
+    {%- set allowed = [
+      'preclass_standard', 'preclass_material', 'preclass_coming',
+      'preclass_ready', 'preclass_short'
+    ] -%}
+    {%- set raw = pre_class_message_styles_input -%}
+    {%- set values = [raw] if raw is string else
+      (raw if raw is iterable and raw is not mapping else []) -%}
+    {%- set ns = namespace(items=[]) -%}
+    {%- for item in values -%}
+      {%- set value = item | string | trim -%}
+      {%- if value in allowed and value not in ns.items -%}
+        {%- set ns.items = ns.items + [value] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{- ns.items if ns.items | count > 0 else ['preclass_standard'] -}}
   # Only choose-selector mappings are valid. Unknown or scalar values fail safe.
   schedule_mode: >-
     {%- set modes = {
@@ -444,6 +544,32 @@ actions:
           entity_id: "{{ calendar_entities }}"
         continue_on_error: true
 
+  # A valid legacy scalar is actionable migration information. Restrict the warning
+  # to local midnight so the minute heartbeat does not flood the system log.
+  - alias: 舊 scalar 排程每日遷移警告
+    if:
+      - condition: trigger
+        id: heartbeat
+      - condition: template
+        value_template: "{{ enable_scheduled_update_input }}"
+      - condition: template
+        value_template: "{{ legacy_schedule_detected }}"
+      - alias: 本地時間每天只在 00:00 提醒一次
+        condition: template
+        value_template: >-
+          {{ as_local(as_datetime(check_time | float(0))).strftime('%H:%M') == '00:00' }}
+    then:
+      - action: system_log.write
+        data:
+          level: warning
+          logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+          message: >-
+            AmazingTalker Voice Reminder v0.4.0 detected a legacy scheduled-refresh
+            value. Scheduled refresh is disabled for safety until this automation is
+            opened, a new daily/weekly/monthly Update Schedule is selected, and the
+            automation is saved. Morning summaries and pre-class reminders remain active.
+        continue_on_error: true
+
   - choose:
       - alias: 早晨摘要分支
         conditions:
@@ -499,6 +625,10 @@ actions:
                 {% endif %}
                 {% set events = ns.events | sort(attribute='sort_key') %}
                 {% if events | count > 0 %}
+                  {# 純 random，不排除前次結果；一次實際 playback 只抽一次。 #}
+                  {% set selected_style = selected_morning_styles | random %}
+                  {% set opening = morning_phrase_map.get(
+                    selected_style, morning_phrase_map.get('morning_standard')) %}
                   {% set order = namespace(names=[]) %}
                   {% for event in events %}
                     {% if event.learner not in order.names %}
@@ -517,12 +647,14 @@ actions:
                     {%- endif -%}
                     {{- period ~ h ~ '點' ~ (minute ~ '分' if minute else '') -}}
                   {%- endmacro %}
-                  早安提醒，今天有 AmazingTalker 課程。
-                  {%- for name in order.names %}
-                    {% set learner_events = events | selectattr('learner', 'eq', name) | list %}
-                    {{ name }} 的課程時間是
+                  {{- opening -}}
+                  {%- for name in order.names -%}
+                    {%- set learner_events = events
+                      | selectattr('learner', 'eq', name) | list -%}
+                    {{- name }} 的課程時間是
                     {%- for event in learner_events -%}
-                      {{ spoken_time(event.start) }}{{ '、' if not loop.last else '。' }}
+                      {{- spoken_time(event.start) -}}
+                      {{- '、' if not loop.last else '。' -}}
                     {%- endfor %}
                   {%- endfor %}
                 {% endif %}
@@ -873,19 +1005,30 @@ actions:
                   {{ ns.items | unique(attribute='reminder_key') | list }}
                 {% endif %}
               reminder_message: >-
-                {% set offsets = confirmed_candidates | map(attribute='remaining') | unique | sort(reverse=true) | list %}
-                {% for offset in offsets %}
-                  {% set group = confirmed_candidates | selectattr('remaining', 'eq', offset) | list %}
-                  {% set names = group | map(attribute='learner') | unique | list %}
-                  提醒您，
-                  {%- for name in names -%}
-                    {{ name }}
-                    {%- if not loop.last -%}
-                      {{ ' 和 ' if loop.index == (names | count) - 1 else '、' }}
-                    {%- endif -%}
+                {%- if confirmed_candidates | count > 0 -%}
+                  {#- 純 random，不排除前次結果；整次 playback 的所有 offset 共用同一 style。 -#}
+                  {%- set selected_style = selected_pre_class_styles | random -%}
+                  {%- set phrase_template = pre_class_phrase_map.get(
+                    selected_style, pre_class_phrase_map.get('preclass_standard')) -%}
+                  {%- set offsets = confirmed_candidates
+                    | map(attribute='remaining') | unique | sort(reverse=true) | list -%}
+                  {%- for offset in offsets -%}
+                    {%- set group = confirmed_candidates
+                      | selectattr('remaining', 'eq', offset) | list -%}
+                    {%- set names = group | map(attribute='learner') | unique | list -%}
+                    {%- set names_text -%}
+                      {%- for name in names -%}
+                        {{- name -}}
+                        {%- if not loop.last -%}
+                          {{- ' 和 ' if loop.index == (names | count) - 1 else '、' -}}
+                        {%- endif -%}
+                      {%- endfor -%}
+                    {%- endset %}
+                    {{- phrase_template
+                      | replace('{names}', names_text)
+                      | replace('{minutes}', offset | string) -}}
                   {%- endfor %}
-                  的 AmazingTalker 課程將在{{ offset }}分鐘後開始。
-                {%- endfor %}
+                {%- endif -%}
           - alias: 沒有待提醒課程時不改音量也不播放
             condition: template
             value_template: "{{ reminder_message | trim | length > 0 }}"
