@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## v0.5.0 - 2026-08-21
+
+### Added
+
+- Added opt-in, structured diagnostic logging with correlated run IDs, normal/debug detail levels, and safe/detailed privacy modes.
+- Added fixed diagnostic event codes for scheduled refresh, morning summaries, calendar queries, targeted refresh, reminder verification, TTS dispatch, per-player playback, and volume restoration.
+- Added a retention hint input with an explicit pure-Blueprint limitation: Home Assistant system-log or file rotation and cleanup remain installation-managed.
+- Added privacy, schema, defaults, and empty-heartbeat noise regression tests.
+- Added a Traditional Chinese diagnostic logging guide and synthetic JSONL example.
+
+### Changed
+
+- Standardized existing warning logger names and added run/event correlation without making diagnostic logging mandatory.
+- Kept action outcomes conservative: services without observable success responses are recorded as `action_dispatched`, not `success`.
+
+### Security
+
+- Diagnostic payloads serialize only explicitly allowlisted fields. Safe mode omits learner names and event summaries; all modes exclude private Calendar URLs and credentials by design.
+
 ## v0.4.1 - 2026-08-21
 
 ### Changed

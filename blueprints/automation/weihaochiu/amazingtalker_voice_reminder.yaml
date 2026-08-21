@@ -1,7 +1,7 @@
 blueprint:
-  name: AmazingTalker 多學員課程語音提醒 · v0.4.1
+  name: AmazingTalker 多學員課程語音提醒 · v0.5.0
   description: >-
-    版本：v0.4.1。最低 Home Assistant：2026.1.0。
+    版本：v0.5.0。最低 Home Assistant：2026.1.0。
     AmazingTalker Multi-Learner Voice Reminder。從多個 Remote Calendar 行事曆讀取課程，
     提供每日摘要、可自訂課前提醒、取消/改期前重新確認、多播放器播報與個別音量恢復。
     本專案非 AmazingTalker 官方專案。AmazingTalker Calendar URL 是私人讀取網址，請勿公開。
@@ -16,7 +16,7 @@ blueprint:
       name: 學員行事曆
       icon: mdi:calendar-account
       description: >-
-        目前 Blueprint：v0.4.1。每位學員需先建立一個 Remote Calendar。至少新增一筆。
+        目前 Blueprint：v0.5.0。每位學員需先建立一個 Remote Calendar。至少新增一筆。
         Calendar URL 是私人讀取網址，不可貼到 GitHub、Issue 或公開論壇。
       input:
         learners:
@@ -336,6 +336,67 @@ blueprint:
           selector:
             boolean:
 
+    diagnostic_logging_section:
+      name: 診斷紀錄與除錯
+      icon: mdi:file-document-alert
+      collapsed: true
+      description: >-
+        以單行 JSON 寫入 Home Assistant system log，供問題重現與流程比對。
+        Blueprint 不會讀取或記錄 Remote Calendar 私人網址。實體檔案輪替與刪除
+        不在 Blueprint 權限範圍內；保留天數欄位僅供診斷內容與外部管理參考。
+      input:
+        enable_diagnostic_logging:
+          name: 啟用診斷紀錄
+          description: >-
+            關閉時不建立一般 diagnostic events；既有 warning/error system log 仍會保留。
+            啟用後可用於除錯，且永遠不會記錄私人 Calendar URL 或憑證。
+          default: false
+          selector:
+            boolean:
+        diagnostic_log_level:
+          name: 診斷紀錄層級
+          description: >-
+            一般只記錄有實際動作或結果的流程；詳細除錯另記 query、計數與狀態。
+            兩種層級都不會為空白 heartbeat 寫入紀錄。
+          default: normal
+          selector:
+            select:
+              custom_value: false
+              mode: dropdown
+              options:
+                - label: 一般
+                  value: normal
+                - label: 詳細除錯
+                  value: debug
+        diagnostic_log_retention_days:
+          name: 診斷紀錄保留天數
+          description: >-
+            保留政策提示值（1～30 天），會寫入 flow header 供外部管理參考。
+            system log 與實體檔案的 rotation/cleanup 由 Home Assistant 安裝環境管理，
+            Blueprint 無法套用此數值或自動刪除檔案。
+          default: 7
+          selector:
+            number:
+              min: 1
+              max: 30
+              step: 1
+              mode: box
+        diagnostic_privacy_mode:
+          name: 診斷資料隱私模式
+          description: >-
+            安全模式不記錄學員名稱或 event summary；詳細模式可記錄這兩項課程內容。
+            兩種模式都永遠禁止 Calendar URL、token、cookie、password 與 credentials。
+          default: safe
+          selector:
+            select:
+              custom_value: false
+              mode: dropdown
+              options:
+                - label: 安全
+                  value: safe
+                - label: 詳細
+                  value: detailed
+
 # parallel 讓上一分鐘的 TTS 等待不會阻塞下一次 heartbeat。queued 會讓舊執行延後後
 # 以過時工作排隊；single 會漏掉 heartbeat。每次執行固定 check_time，避免舊執行重算 now()。
 mode: parallel
@@ -368,9 +429,54 @@ variables:
   enable_pre_class_refresh_input: !input enable_pre_class_refresh
   pre_class_refresh_minutes_input: !input pre_class_refresh_minutes
   verify_before_each_reminder_input: !input verify_before_each_reminder
+  enable_diagnostic_logging_input: !input enable_diagnostic_logging
+  diagnostic_log_level_input: !input diagnostic_log_level
+  diagnostic_log_retention_days_input: !input diagnostic_log_retention_days
+  diagnostic_privacy_mode_input: !input diagnostic_privacy_mode
   # Numeric timestamps survive Home Assistant's cross-action template serialization.
   check_time: "{{ as_timestamp(now()) }}"
   check_minute: "{{ ((check_time | float(0)) // 60 * 60) | int }}"
+  diagnostic_trigger: >-
+    {{ trigger.id
+       if trigger is defined and trigger.id is defined and trigger.id
+       else 'manual' }}
+  diagnostic_run_id: >-
+    {{ as_local(as_datetime(check_time | float(0))).strftime('%Y%m%dT%H%M%S%f')
+       ~ '-' ~ diagnostic_trigger }}
+  diagnostic_level: >-
+    {{ diagnostic_log_level_input
+       if diagnostic_log_level_input in ['normal', 'debug'] else 'normal' }}
+  diagnostic_privacy: >-
+    {{ diagnostic_privacy_mode_input
+       if diagnostic_privacy_mode_input in ['safe', 'detailed'] else 'safe' }}
+  diagnostic_event_codes:
+    - AUTOMATION_START
+    - SCHEDULED_REFRESH_START
+    - SCHEDULED_REFRESH_RESULT
+    - MORNING_QUERY_START
+    - MORNING_QUERY_RESULT
+    - MORNING_SUMMARY_CREATED
+    - MORNING_SUMMARY_SKIPPED
+    - HEARTBEAT_ACTIONABLE
+    - CALENDAR_QUERY_START
+    - CALENDAR_QUERY_RESULT
+    - REFRESH_REQUIRED
+    - CALENDAR_REFRESH_START
+    - CALENDAR_REFRESH_RESULT
+    - REMINDER_CANDIDATE
+    - REMINDER_VERIFY_START
+    - REMINDER_VERIFY_RESULT
+    - REMINDER_CONFIRMED
+    - REMINDER_SKIPPED
+    - TTS_PREPARE
+    - PLAYER_VOLUME_SET
+    - PLAYER_PLAY_START
+    - PLAYER_PLAY_RESULT
+    - PLAYER_VOLUME_RESTORE
+    - PLAYER_VOLUME_RESTORE_RESULT
+    - AUTOMATION_COMPLETE
+    - WARNING
+    - ERROR
   legacy_schedule_detected: >-
     {{- update_frequency_input is string
         and update_frequency_input | lower | trim in ['daily', 'weekly', 'monthly'] -}}
@@ -481,6 +587,29 @@ variables:
       {%- endif -%}
     {%- endfor -%}
     {{- ns.items | sort -}}
+  scheduled_update_due: >-
+    {%- set run_time = as_local(as_datetime(check_time | float(0))) -%}
+    {%- set configured_time = schedule_time | string | trim -%}
+    {%- set weekday_names = [
+      'monday', 'tuesday', 'wednesday', 'thursday',
+      'friday', 'saturday', 'sunday'
+    ] -%}
+    {%- set next_month = (run_time.replace(day=28) + timedelta(days=4)).replace(day=1) -%}
+    {%- set last_day = (next_month - timedelta(days=1)).day -%}
+    {%- set effective = namespace(days=[]) -%}
+    {%- for selected_day in schedule_month_days -%}
+      {%- set effective_day = [selected_day | int(0), last_day] | min -%}
+      {%- if effective_day > 0 and effective_day not in effective.days -%}
+        {%- set effective.days = effective.days + [effective_day] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{- configured_time | length >= 5
+       and run_time.strftime('%H:%M') == configured_time[:5]
+       and (schedule_mode == 'daily'
+         or (schedule_mode == 'weekly'
+           and weekday_names[run_time.weekday()] in schedule_weekdays)
+         or (schedule_mode == 'monthly'
+           and run_time.day in effective.days)) -}}
   calendar_entities: >-
     {% set ns = namespace(items=[]) %}
     {% for learner in learners_input if learner is mapping %}
@@ -506,6 +635,39 @@ conditions:
     value_template: "{{ calendar_entities | count > 0 }}"
 
 actions:
+  # YAML anchor provides one schema implementation for every diagnostic event. Each call
+  # sets only allowlisted details; no integration config, URL, credential, or whole state
+  # object is ever serialized. Normal/debug describes event detail, while system_log uses
+  # info so enabled diagnostics remain available in the raw Home Assistant log.
+  - &emit_diagnostic
+    alias: 發送隱私安全的結構化診斷事件
+    if:
+      - condition: template
+        value_template: >-
+          {{ enable_diagnostic_logging_input
+             and diagnostic_event is defined
+             and diagnostic_event in diagnostic_event_codes
+             and diagnostic_emit | default(true)
+             and (diagnostic_event_level | default('normal') != 'debug'
+               or diagnostic_level == 'debug') }}
+    then:
+      - action: system_log.write
+        data:
+          level: info
+          logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+          message: >-
+            {%- set base = {
+              'timestamp': now().isoformat(),
+              'version': 'v0.5.0',
+              'run_id': diagnostic_run_id,
+              'trigger': diagnostic_trigger,
+              'level': diagnostic_event_level | default('normal'),
+              'event': diagnostic_event,
+              'result': diagnostic_result | default('unknown')
+            } -%}
+            {{- dict(base, **(diagnostic_details | default({}))) | to_json -}}
+        continue_on_error: true
+
   # This independent if deliberately continues into the heartbeat reminder flow. A single
   # heartbeat can therefore perform both scheduled refresh and pre-class work.
   - alias: 符合排程時定期強制更新
@@ -516,35 +678,74 @@ actions:
         value_template: "{{ enable_scheduled_update_input }}"
       - alias: 符合時間與每日、每週或月底 fallback 規則
         condition: template
-        value_template: >-
-          {%- set run_time = as_local(as_datetime(check_time | float(0))) -%}
-          {%- set configured_time = schedule_time | string | trim -%}
-          {%- set weekday_names = [
-            'monday', 'tuesday', 'wednesday', 'thursday',
-            'friday', 'saturday', 'sunday'
-          ] -%}
-          {%- set next_month = (run_time.replace(day=28) + timedelta(days=4)).replace(day=1) -%}
-          {%- set last_day = (next_month - timedelta(days=1)).day -%}
-          {%- set effective = namespace(days=[]) -%}
-          {%- for selected_day in schedule_month_days -%}
-            {%- set effective_day = [selected_day | int(0), last_day] | min -%}
-            {%- if effective_day > 0 and effective_day not in effective.days -%}
-              {%- set effective.days = effective.days + [effective_day] -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{- configured_time | length >= 5
-             and run_time.strftime('%H:%M') == configured_time[:5]
-             and (schedule_mode == 'daily'
-               or (schedule_mode == 'weekly'
-                 and weekday_names[run_time.weekday()] in schedule_weekdays)
-               or (schedule_mode == 'monthly'
-                 and run_time.day in effective.days)) -}}
+        value_template: "{{ scheduled_update_due }}"
     then:
+      - variables:
+          diagnostic_flow_started: true
+          scheduled_unavailable_calendars: >-
+            {% set ns = namespace(items=[]) %}
+            {% for entity in calendar_entities
+                   if states(entity) in ['unknown', 'unavailable'] %}
+              {% set ns.items = ns.items + [entity] %}
+            {% endfor %}
+            {{ ns.items }}
+          diagnostic_event: AUTOMATION_START
+          diagnostic_result: started
+          diagnostic_event_level: normal
+          diagnostic_emit: true
+          diagnostic_details: >-
+            {{ {
+              'timezone': now().tzinfo | string,
+              'diagnostic_level': diagnostic_level,
+              'privacy_mode': diagnostic_privacy,
+              'retention_days_hint': diagnostic_log_retention_days_input | int(7),
+              'calendar_count': calendar_entities | count,
+              'player_count': media_players_input | count
+            } }}
+      - *emit_diagnostic
+      - variables:
+          diagnostic_event: SCHEDULED_REFRESH_START
+          diagnostic_result: started
+          diagnostic_event_level: normal
+          diagnostic_details: >-
+            {{ {
+              'calendar_count': calendar_entities | count,
+              'schedule_mode': schedule_mode,
+              'scheduled_time': schedule_time
+            } }}
+      - *emit_diagnostic
+      - if:
+          - condition: template
+            value_template: "{{ scheduled_unavailable_calendars | count > 0 }}"
+        then:
+          - action: system_log.write
+            data:
+              level: warning
+              logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+              message: >-
+                [run_id={{ diagnostic_run_id }}] [WARNING]
+                Scheduled refresh includes unavailable calendars:
+                {{ scheduled_unavailable_calendars | join(', ') }}.
+            continue_on_error: true
       - alias: 本分鐘一次強制更新所有選取的行事曆
         action: homeassistant.update_entity
         target:
           entity_id: "{{ calendar_entities }}"
         continue_on_error: true
+      - variables:
+          diagnostic_event: SCHEDULED_REFRESH_RESULT
+          diagnostic_result: action_dispatched
+          diagnostic_event_level: normal
+          diagnostic_details: >-
+            {{ {
+              'calendar_count': calendar_entities | count,
+              'available_calendar_count': calendar_entities
+                | reject('is_state', 'unavailable')
+                | reject('is_state', 'unknown') | list | count,
+              'schedule_mode': schedule_mode,
+              'scheduled_time': schedule_time
+            } }}
+      - *emit_diagnostic
 
   # A valid legacy scalar is actionable migration information. Restrict the warning
   # to local midnight so the minute heartbeat does not flood the system log.
@@ -561,15 +762,17 @@ actions:
         value_template: >-
           {{ as_local(as_datetime(check_time | float(0))).strftime('%H:%M') == '00:00' }}
     then:
+      - variables:
+          diagnostic_flow_started: true
       - action: system_log.write
         data:
           level: warning
           logger: blueprints.weihaochiu.amazingtalker_voice_reminder
           message: >-
-            AmazingTalker Voice Reminder v0.4.1 detected a legacy scheduled-refresh
-            value. Scheduled refresh is disabled for safety until this automation is
-            opened, a new daily/weekly/monthly Update Schedule is selected, and the
-            automation is saved. Morning summaries and pre-class reminders remain active.
+            [run_id={{ diagnostic_run_id }}] [WARNING]
+            AmazingTalker Voice Reminder v0.5.0 detected a legacy scheduled-refresh
+            value; scheduled refresh is disabled until a structured schedule is saved.
+            Morning summaries and pre-class reminders remain active.
         continue_on_error: true
 
   - choose:
@@ -585,6 +788,83 @@ actions:
                 {{ calendar_entities
                    | reject('is_state', 'unavailable')
                    | reject('is_state', 'unknown') | list }}
+              unavailable_calendars: >-
+                {{ calendar_entities | reject('in', available_calendars) | list }}
+              diagnostic_flow_started: true
+              diagnostic_event: AUTOMATION_START
+              diagnostic_result: started
+              diagnostic_event_level: normal
+              diagnostic_emit: true
+              diagnostic_details: >-
+                {{ {
+                  'timezone': now().tzinfo | string,
+                  'diagnostic_level': diagnostic_level,
+                  'privacy_mode': diagnostic_privacy,
+                  'retention_days_hint': diagnostic_log_retention_days_input | int(7),
+                  'calendar_count': calendar_entities | count,
+                  'player_count': media_players_input | count
+                } }}
+          - *emit_diagnostic
+          - if:
+              - condition: template
+                value_template: "{{ unavailable_calendars | count > 0 }}"
+            then:
+              - action: system_log.write
+                data:
+                  level: warning
+                  logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+                  message: >-
+                    [run_id={{ diagnostic_run_id }}] [WARNING]
+                    Morning query skipped unavailable calendars:
+                    {{ unavailable_calendars | join(', ') }}.
+                continue_on_error: true
+          - variables:
+              morning_query_start: >-
+                {{ as_local(as_datetime(check_time | float(0)))
+                   .replace(hour=0, minute=0, second=0, microsecond=0) }}
+              morning_query_end: >-
+                {{ as_local(as_datetime(check_time | float(0)))
+                   .replace(hour=0, minute=0, second=0, microsecond=0)
+                   + timedelta(days=1) }}
+              diagnostic_event: MORNING_QUERY_START
+              diagnostic_result: started
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ available_calendars | count > 0 }}"
+              diagnostic_details: >-
+                {{ {
+                  'available_calendar_count': available_calendars | count,
+                  'query_start': morning_query_start | string,
+                  'query_end': morning_query_end | string
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: MORNING_QUERY_RESULT
+              diagnostic_result: skipped
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ available_calendars | count == 0 }}"
+              diagnostic_details: >-
+                {{ {
+                  'available_calendar_count': 0,
+                  'event_count': 0,
+                  'reason': 'no_available_calendars',
+                  'query_start': morning_query_start | string,
+                  'query_end': morning_query_end | string
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: MORNING_SUMMARY_SKIPPED
+              diagnostic_result: skipped
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ available_calendars | count == 0 }}"
+              diagnostic_details: "{{ {'reason': 'no_available_calendars'} }}"
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: AUTOMATION_COMPLETE
+              diagnostic_result: completed
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ available_calendars | count == 0 }}"
+              diagnostic_details: "{{ {'reason': 'no_available_calendars'} }}"
+          - *emit_diagnostic
           - alias: 沒有可查詢行事曆時安全結束
             condition: template
             value_template: "{{ available_calendars | count > 0 }}"
@@ -602,6 +882,19 @@ actions:
             response_variable: morning_agenda
             continue_on_error: true
           - variables:
+              morning_event_count: >-
+                {% set ns = namespace(count=0) %}
+                {% if morning_agenda is defined %}
+                  {% for entity in available_calendars %}
+                    {% for event in morning_agenda.get(entity, {}).get('events', []) %}
+                      {% set raw_start = event.get('start', '') | string %}
+                      {% if 'T' in raw_start or ' ' in raw_start %}
+                        {% set ns.count = ns.count + 1 %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endfor %}
+                {% endif %}
+                {{ ns.count }}
               morning_message: >-
                 {# 建立已排序 timed events；日期型 start 是全天事件，直接忽略。 #}
                 {% set ns = namespace(events=[]) %}
@@ -660,6 +953,49 @@ actions:
                     {%- endfor %}
                   {%- endfor %}
                 {% endif %}
+          - variables:
+              diagnostic_event: MORNING_QUERY_RESULT
+              diagnostic_result: >-
+                {{ 'completed' if morning_agenda is defined else 'failed' }}
+              diagnostic_event_level: normal
+              diagnostic_emit: true
+              diagnostic_details: >-
+                {{ {
+                  'available_calendar_count': available_calendars | count,
+                  'event_count': morning_event_count | int(0),
+                  'reason': 'service_response_unavailable'
+                    if morning_agenda is not defined else none,
+                  'query_start': morning_query_start | string,
+                  'query_end': morning_query_end | string
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: >-
+                {{ 'MORNING_SUMMARY_CREATED'
+                   if morning_message | trim | length > 0
+                   else 'MORNING_SUMMARY_SKIPPED' }}
+              diagnostic_result: >-
+                {{ 'created' if morning_message | trim | length > 0 else 'skipped' }}
+              diagnostic_event_level: normal
+              diagnostic_emit: true
+              diagnostic_details: >-
+                {{ {
+                  'event_count': morning_event_count | int(0),
+                  'message_length': morning_message | trim | length,
+                  'reason': ('calendar_query_failed'
+                    if morning_agenda is not defined else 'no_timed_events')
+                    if morning_message | trim | length == 0 else none
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: AUTOMATION_COMPLETE
+              diagnostic_result: completed
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ morning_message | trim | length == 0 }}"
+              diagnostic_details: >-
+                {{ {'reason': 'calendar_query_failed'
+                    if morning_agenda is not defined else 'no_timed_events'} }}
+          - *emit_diagnostic
           - alias: 沒有課程時不改音量也不播放
             condition: template
             value_template: "{{ morning_message | trim | length > 0 }}"
@@ -667,12 +1003,14 @@ actions:
             sequence: &play_announcement
               - variables:
                   announcement_message: "{{ morning_message | trim }}"
+                  announcement_kind: "{{ announcement_kind | default('morning_summary') }}"
                   player_snapshots: >-
                     {% set ns = namespace(items=[]) %}
                     {% for player in media_players_input %}
                       {% if states(player) not in ['unknown', 'unavailable'] %}
                         {% set ns.items = ns.items + [{
                           'entity_id': player,
+                          'state': states(player),
                           'volume': state_attr(player, 'volume_level')
                             if restore_original_volume_input else none
                         }] %}
@@ -681,6 +1019,39 @@ actions:
                     {{ ns.items }}
                   speech_wait_seconds: >-
                     {{ [[((announcement_message | length) / 3) | round(0, 'ceil') | int + 6, 8] | max, 120] | min }}
+              - variables:
+                  diagnostic_event: TTS_PREPARE
+                  diagnostic_result: prepared
+                  diagnostic_event_level: normal
+                  diagnostic_emit: true
+                  diagnostic_details: >-
+                    {{ {
+                      'announcement_kind': announcement_kind,
+                      'tts_entity': tts_entity_input,
+                      'language': tts_language_input,
+                      'message_length': announcement_message | length,
+                      'player_count': player_snapshots | count,
+                      'selected_player_count': media_players_input | count,
+                      'announce': attempt_media_resume_input
+                    } }}
+              - *emit_diagnostic
+              - repeat:
+                  for_each: >-
+                    {{ media_players_input | reject('in',
+                       player_snapshots | map(attribute='entity_id') | list) | list }}
+                  sequence:
+                    - variables:
+                        diagnostic_event: PLAYER_PLAY_RESULT
+                        diagnostic_result: skipped
+                        diagnostic_event_level: normal
+                        diagnostic_emit: true
+                        diagnostic_details: >-
+                          {{ {
+                            'player': repeat.item,
+                            'reason': 'player_unavailable',
+                            'initial_state': states(repeat.item)
+                          } }}
+                    - *emit_diagnostic
               - alias: 沒有可用播放器時安全結束並在 trace 留下此條件
                 condition: template
                 value_template: "{{ player_snapshots | count > 0 }}"
@@ -694,10 +1065,37 @@ actions:
                       data:
                         volume_level: "{{ announcement_volume_input | float(0.8) }}"
                       continue_on_error: true
+                    - variables:
+                        diagnostic_event: PLAYER_VOLUME_SET
+                        diagnostic_result: action_dispatched
+                        diagnostic_event_level: normal
+                        diagnostic_emit: true
+                        diagnostic_details: >-
+                          {{ {
+                            'player': repeat.item.entity_id,
+                            'initial_state': repeat.item.state,
+                            'initial_volume': repeat.item.volume,
+                            'target_volume': announcement_volume_input | float(0.8),
+                            'observed_volume': state_attr(
+                              repeat.item.entity_id, 'volume_level')
+                          } }}
+                    - *emit_diagnostic
               - alias: 分別播放；單台失敗不阻止其他播放器
                 repeat:
                   for_each: "{{ player_snapshots }}"
                   sequence:
+                    - variables:
+                        diagnostic_event: PLAYER_PLAY_START
+                        diagnostic_result: started
+                        diagnostic_event_level: normal
+                        diagnostic_emit: true
+                        diagnostic_details: >-
+                          {{ {
+                            'player': repeat.item.entity_id,
+                            'initial_state': repeat.item.state,
+                            'initial_volume': repeat.item.volume
+                          } }}
+                    - *emit_diagnostic
                     - action: media_player.play_media
                       target:
                         entity_id: "{{ repeat.item.entity_id }}"
@@ -709,6 +1107,18 @@ actions:
                         media_content_type: music
                         announce: "{{ attempt_media_resume_input }}"
                       continue_on_error: true
+                    - variables:
+                        diagnostic_event: PLAYER_PLAY_RESULT
+                        diagnostic_result: action_dispatched
+                        diagnostic_event_level: normal
+                        diagnostic_emit: true
+                        diagnostic_details: >-
+                          {{ {
+                            'player': repeat.item.entity_id,
+                            'observed_state': states(repeat.item.entity_id),
+                            'reason': 'service_has_no_success_response'
+                          } }}
+                    - *emit_diagnostic
               - alias: 依訊息長度保留最低播放時間，避免 action 返回後立即降音量
                 delay:
                   seconds: "{{ speech_wait_seconds }}"
@@ -723,6 +1133,22 @@ actions:
                 repeat:
                   for_each: "{{ player_snapshots if restore_original_volume_input else [] }}"
                   sequence:
+                    - variables:
+                        diagnostic_event: PLAYER_VOLUME_RESTORE
+                        diagnostic_result: >-
+                          {{ 'started' if repeat.item.volume is number else 'skipped' }}
+                        diagnostic_event_level: normal
+                        diagnostic_emit: true
+                        diagnostic_details: >-
+                          {{ {
+                            'player': repeat.item.entity_id,
+                            'initial_volume': repeat.item.volume,
+                            'before_restore': state_attr(
+                              repeat.item.entity_id, 'volume_level'),
+                            'reason': none if repeat.item.volume is number
+                              else 'no_volume_level'
+                          } }}
+                    - *emit_diagnostic
                     - if:
                         - condition: template
                           value_template: "{{ repeat.item.volume is number }}"
@@ -733,6 +1159,40 @@ actions:
                           data:
                             volume_level: "{{ repeat.item.volume }}"
                           continue_on_error: true
+                        - variables:
+                            diagnostic_event: PLAYER_VOLUME_RESTORE_RESULT
+                            diagnostic_result: action_dispatched
+                            diagnostic_event_level: normal
+                            diagnostic_emit: true
+                            diagnostic_details: >-
+                              {{ {
+                                'player': repeat.item.entity_id,
+                                'target_volume': repeat.item.volume,
+                                'observed_volume': state_attr(
+                                  repeat.item.entity_id, 'volume_level'),
+                                'reason': 'service_has_no_success_response'
+                              } }}
+                        - *emit_diagnostic
+                      else:
+                        - variables:
+                            diagnostic_event: PLAYER_VOLUME_RESTORE_RESULT
+                            diagnostic_result: restore_skipped
+                            diagnostic_event_level: normal
+                            diagnostic_emit: true
+                            diagnostic_details: >-
+                              {{ {
+                                'player': repeat.item.entity_id,
+                                'reason': 'no_volume_level'
+                              } }}
+                        - *emit_diagnostic
+
+          - variables:
+              diagnostic_event: AUTOMATION_COMPLETE
+              diagnostic_result: completed
+              diagnostic_event_level: normal
+              diagnostic_emit: true
+              diagnostic_details: "{{ {'announcement_kind': 'morning_summary'} }}"
+          - *emit_diagnostic
 
       - alias: 每分鐘 heartbeat 課前流程
         conditions:
@@ -748,6 +1208,8 @@ actions:
                 {{ calendar_entities
                    | reject('is_state', 'unavailable')
                    | reject('is_state', 'unknown') | list }}
+              unavailable_calendars: >-
+                {{ calendar_entities | reject('in', available_calendars) | list }}
               query_horizon_minutes: >-
                 {% set largest_offset = (normalized_offsets | max)
                   if normalized_offsets | count > 0 else 0 %}
@@ -824,10 +1286,113 @@ actions:
                   }] %}
                 {% endfor %}
                 {{ ns.items }}
+              heartbeat_query_failed: "{{ heartbeat_agenda is not defined }}"
+              diagnostic_flow_started: >-
+                {{ refresh_calendars | count > 0
+                   or heartbeat_agenda is not defined
+                   or (diagnostic_level == 'debug' and cached_events | count > 0) }}
+              diagnostic_header_emitted: >-
+                {{ refresh_calendars | count > 0
+                   or heartbeat_agenda is not defined
+                   or (diagnostic_level == 'debug' and cached_events | count > 0) }}
+              diagnostic_event: AUTOMATION_START
+              diagnostic_result: started
+              diagnostic_event_level: normal
+              diagnostic_emit: >-
+                {{ refresh_calendars | count > 0
+                   or heartbeat_agenda is not defined
+                   or (diagnostic_level == 'debug' and cached_events | count > 0) }}
+              diagnostic_details: >-
+                {{ {
+                  'timezone': now().tzinfo | string,
+                  'diagnostic_level': diagnostic_level,
+                  'privacy_mode': diagnostic_privacy,
+                  'retention_days_hint': diagnostic_log_retention_days_input | int(7),
+                  'calendar_count': calendar_entities | count,
+                  'player_count': media_players_input | count
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: HEARTBEAT_ACTIONABLE
+              diagnostic_result: >-
+                {{ 'query_failed' if heartbeat_query_failed
+                   else ('refresh_required' if refresh_calendars | count > 0
+                     else 'cached_events_in_horizon') }}
+              diagnostic_event_level: >-
+                {{ 'normal' if refresh_calendars | count > 0
+                   or heartbeat_query_failed else 'debug' }}
+              diagnostic_emit: >-
+                {{ refresh_calendars | count > 0
+                   or heartbeat_query_failed or cached_events | count > 0 }}
+              diagnostic_details: >-
+                {{ {
+                  'event_count': cached_events | count,
+                  'refresh_calendar_count': refresh_calendars | count,
+                  'query_horizon_minutes': query_horizon_minutes | int
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: CALENDAR_QUERY_START
+              diagnostic_result: started
+              diagnostic_event_level: debug
+              diagnostic_emit: >-
+                {{ cached_events | count > 0 or heartbeat_query_failed }}
+              diagnostic_details: >-
+                {{ {
+                  'available_calendar_count': available_calendars | count,
+                  'query_start': as_local(as_datetime(check_minute | float(0))) | string,
+                  'query_end': (as_local(as_datetime(check_minute | float(0)))
+                    + timedelta(minutes=query_horizon_minutes | int)) | string
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: CALENDAR_QUERY_RESULT
+              diagnostic_result: >-
+                {{ 'completed' if heartbeat_agenda is defined else 'failed' }}
+              diagnostic_event_level: >-
+                {{ 'normal' if heartbeat_query_failed else 'debug' }}
+              diagnostic_emit: >-
+                {{ cached_events | count > 0 or heartbeat_query_failed }}
+              diagnostic_details: >-
+                {{ {
+                  'available_calendar_count': available_calendars | count,
+                  'event_count': cached_events | count,
+                  'reason': 'service_response_unavailable'
+                    if heartbeat_query_failed else none,
+                  'query_start': as_local(as_datetime(check_minute | float(0))) | string,
+                  'query_end': (as_local(as_datetime(check_minute | float(0)))
+                    + timedelta(minutes=query_horizon_minutes | int)) | string
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_event: REFRESH_REQUIRED
+              diagnostic_result: required
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ refresh_calendars | count > 0 }}"
+              diagnostic_details: >-
+                {{ {
+                  'calendar_count': refresh_calendars | count,
+                  'remaining_minutes': pre_class_refresh_minutes_input | int(60)
+                } }}
+          - *emit_diagnostic
           - alias: 課前指定時間重新同步，每個目標行事曆一次
             repeat:
               for_each: "{{ refresh_calendars }}"
               sequence:
+                - variables:
+                    diagnostic_event: CALENDAR_REFRESH_START
+                    diagnostic_result: started
+                    diagnostic_event_level: normal
+                    diagnostic_emit: true
+                    diagnostic_details: >-
+                      {%- set snapshots = refresh_snapshots
+                        | selectattr('calendar', 'eq', repeat.item) | list -%}
+                      {{- {
+                        'calendar': repeat.item,
+                        'remaining_minutes': pre_class_refresh_minutes_input | int(60),
+                        'before': snapshots[0].before if snapshots | count > 0 else none
+                      } -}}
+                - *emit_diagnostic
                 - action: homeassistant.update_entity
                   target:
                     entity_id: "{{ repeat.item }}"
@@ -848,6 +1413,46 @@ actions:
                   {% endif %}
                 {% endfor %}
                 {{ ns.items | unique | list }}
+          - repeat:
+              for_each: "{{ refresh_snapshots }}"
+              sequence:
+                - variables:
+                    diagnostic_event: CALENDAR_REFRESH_RESULT
+                    diagnostic_result: >-
+                      {{ 'completed'
+                         if repeat.item.calendar in refresh_successful_calendars
+                         else 'failed' }}
+                    diagnostic_event_level: normal
+                    diagnostic_emit: true
+                    diagnostic_details: >-
+                      {{ {
+                        'calendar': repeat.item.calendar,
+                        'before': repeat.item.before,
+                        'after': as_timestamp(states[repeat.item.calendar].last_reported)
+                          if states[repeat.item.calendar] is defined else none,
+                        'remaining_minutes': pre_class_refresh_minutes_input | int(60),
+                        'reason': none
+                          if repeat.item.calendar in refresh_successful_calendars
+                          else ('calendar_unavailable'
+                            if states(repeat.item.calendar) in ['unknown', 'unavailable']
+                            else 'last_reported_not_advanced')
+                      } }}
+                - *emit_diagnostic
+          - if:
+              - condition: template
+                value_template: >-
+                  {{ refresh_successful_calendars | count
+                     < refresh_calendars | count }}
+            then:
+              - action: system_log.write
+                data:
+                  level: warning
+                  logger: blueprints.weihaochiu.amazingtalker_voice_reminder
+                  message: >-
+                    [run_id={{ diagnostic_run_id }}] [CALENDAR_REFRESH_RESULT]
+                    Pre-class refresh failed because last_reported did not advance or
+                    the calendar was unavailable; affected reminders fail closed.
+                continue_on_error: true
           - alias: 指定時間有重新同步時，重新查詢最新 coordinator 資料
             if:
               - condition: template
@@ -922,12 +1527,80 @@ actions:
                   }] %}
                 {% endfor %}
                 {{ ns.items }}
+          - variables:
+              diagnostic_event: AUTOMATION_START
+              diagnostic_result: started
+              diagnostic_event_level: normal
+              diagnostic_emit: >-
+                {{ reminder_candidates | count > 0
+                   and not (diagnostic_header_emitted | default(false)) }}
+              diagnostic_details: >-
+                {{ {
+                  'timezone': now().tzinfo | string,
+                  'diagnostic_level': diagnostic_level,
+                  'privacy_mode': diagnostic_privacy,
+                  'retention_days_hint': diagnostic_log_retention_days_input | int(7),
+                  'calendar_count': calendar_entities | count,
+                  'player_count': media_players_input | count
+                } }}
+          - *emit_diagnostic
+          - variables:
+              diagnostic_flow_started: >-
+                {{ diagnostic_flow_started | default(false)
+                   or reminder_candidates | count > 0 }}
+              diagnostic_header_emitted: >-
+                {{ diagnostic_header_emitted | default(false)
+                   or reminder_candidates | count > 0 }}
+              diagnostic_event: HEARTBEAT_ACTIONABLE
+              diagnostic_result: reminder_candidates
+              diagnostic_event_level: normal
+              diagnostic_emit: >-
+                {{ reminder_candidates | count > 0 and refresh_calendars | count == 0 }}
+              diagnostic_details: >-
+                {{ {
+                  'event_count': cached_events | count,
+                  'candidate_count': reminder_candidates | count,
+                  'query_horizon_minutes': query_horizon_minutes | int
+                } }}
+          - *emit_diagnostic
+          - repeat:
+              for_each: "{{ reminder_candidates }}"
+              sequence:
+                - variables:
+                    diagnostic_event: REMINDER_CANDIDATE
+                    diagnostic_result: candidate
+                    diagnostic_event_level: normal
+                    diagnostic_emit: true
+                    diagnostic_details: >-
+                      {%- set base = {
+                        'calendar': repeat.item.calendar,
+                        'start': repeat.item.start_raw,
+                        'end': repeat.item.end_raw,
+                        'remaining_minutes': repeat.item.remaining
+                      } -%}
+                      {{- dict(base,
+                        learner=repeat.item.learner,
+                        summary=repeat.item.summary)
+                        if diagnostic_privacy == 'detailed' else base -}}
+                - *emit_diagnostic
           - alias: 每段實際提醒前逐一最後更新；同一行事曆在本 heartbeat 去重
             repeat:
               for_each: "{{ verify_calendars }}"
               sequence:
                 - variables:
                     verify_entity: "{{ repeat.item }}"
+                    diagnostic_event: REMINDER_VERIFY_START
+                    diagnostic_result: started
+                    diagnostic_event_level: normal
+                    diagnostic_emit: true
+                    diagnostic_details: >-
+                      {%- set snapshots = verify_snapshots
+                        | selectattr('calendar', 'eq', repeat.item) | list -%}
+                      {{- {
+                        'calendar': repeat.item,
+                        'before': snapshots[0].before if snapshots | count > 0 else none
+                      } -}}
+                - *emit_diagnostic
                 - action: homeassistant.update_entity
                   target:
                     entity_id: "{{ verify_entity }}"
@@ -978,8 +1651,9 @@ actions:
                       level: warning
                       logger: blueprints.weihaochiu.amazingtalker_voice_reminder
                       message: >-
-                        AmazingTalker reminder verification failed for one or more calendars;
-                        the affected reminder was skipped (fail-closed).
+                        [run_id={{ diagnostic_run_id }}] [REMINDER_VERIFY_RESULT]
+                        Reminder verification refresh failed for one or more calendars;
+                        affected reminders were skipped fail-closed.
                     continue_on_error: true
           - variables:
               confirmed_candidates: >-
@@ -1031,6 +1705,79 @@ actions:
                       | replace('{minutes}', offset | string) -}}
                   {%- endfor %}
                 {%- endif -%}
+          - repeat:
+              for_each: "{{ reminder_candidates }}"
+              sequence:
+                - variables:
+                    candidate_confirmed: >-
+                      {{ repeat.item.reminder_key in
+                         (confirmed_candidates | map(attribute='reminder_key') | list) }}
+                    candidate_reason: >-
+                      {%- if not verify_before_each_reminder_input -%}
+                        verification_disabled
+                      {%- elif repeat.item.calendar not in
+                          (verified_calendar_entities | default([])) -%}
+                        {{- 'calendar_unavailable'
+                           if states(repeat.item.calendar) in ['unknown', 'unavailable']
+                           else 'calendar_refresh_failed' -}}
+                      {%- else -%}
+                        {%- set fresh = verified_agenda.get(
+                          repeat.item.calendar, {}).get('events', [])
+                          if verified_agenda is defined else [] -%}
+                        {%- set same_uid = fresh
+                          | selectattr('uid', 'defined')
+                          | selectattr('uid', 'eq', repeat.item.uid) | list
+                          if repeat.item.uid else [] -%}
+                        {{- 'event_identity_changed'
+                           if same_uid | count > 0 else 'event_missing_after_refresh' -}}
+                      {%- endif -%}
+                    diagnostic_event: REMINDER_VERIFY_RESULT
+                    diagnostic_result: >-
+                      {{ 'confirmed' if candidate_confirmed else 'failed' }}
+                    diagnostic_event_level: normal
+                    diagnostic_emit: "{{ verify_before_each_reminder_input }}"
+                    diagnostic_details: >-
+                      {%- set base = {
+                        'calendar': repeat.item.calendar,
+                        'remaining_minutes': repeat.item.remaining,
+                        'verification_result': 'confirmed'
+                          if candidate_confirmed else 'failed',
+                        'reason': none if candidate_confirmed else candidate_reason
+                      } -%}
+                      {{- dict(base,
+                        learner=repeat.item.learner,
+                        summary=repeat.item.summary)
+                        if diagnostic_privacy == 'detailed' else base -}}
+                - *emit_diagnostic
+                - variables:
+                    diagnostic_event: >-
+                      {{ 'REMINDER_CONFIRMED' if candidate_confirmed
+                         else 'REMINDER_SKIPPED' }}
+                    diagnostic_result: >-
+                      {{ 'confirmed' if candidate_confirmed else 'skipped' }}
+                    diagnostic_event_level: normal
+                    diagnostic_emit: true
+                    diagnostic_details: >-
+                      {%- set base = {
+                        'calendar': repeat.item.calendar,
+                        'remaining_minutes': repeat.item.remaining,
+                        'reason': none if candidate_confirmed else candidate_reason
+                      } -%}
+                      {{- dict(base,
+                        learner=repeat.item.learner,
+                        summary=repeat.item.summary)
+                        if diagnostic_privacy == 'detailed' else base -}}
+                - *emit_diagnostic
+          - variables:
+              diagnostic_event: AUTOMATION_COMPLETE
+              diagnostic_result: completed
+              diagnostic_event_level: normal
+              diagnostic_emit: >-
+                {{ diagnostic_flow_started | default(false)
+                   and reminder_message | trim | length == 0
+                   and not scheduled_update_due }}
+              diagnostic_details: "{{ {'reason': 'no_playback_required'} }}"
+          - *emit_diagnostic
           - alias: 沒有待提醒課程時不改音量也不播放
             condition: template
             value_template: "{{ reminder_message | trim | length > 0 }}"
@@ -1038,4 +1785,23 @@ actions:
             sequence:
               - variables:
                   morning_message: "{{ reminder_message | trim }}"
+                  announcement_kind: pre_class_reminder
               - sequence: *play_announcement
+          - variables:
+              diagnostic_event: AUTOMATION_COMPLETE
+              diagnostic_result: completed
+              diagnostic_event_level: normal
+              diagnostic_emit: "{{ not scheduled_update_due }}"
+              diagnostic_details: "{{ {'announcement_kind': 'pre_class_reminder'} }}"
+          - *emit_diagnostic
+
+  - variables:
+      diagnostic_event: AUTOMATION_COMPLETE
+      diagnostic_result: completed
+      diagnostic_event_level: normal
+      diagnostic_emit: >-
+        {{ enable_scheduled_update_input
+           and diagnostic_trigger == 'heartbeat'
+           and scheduled_update_due }}
+      diagnostic_details: "{{ {'completed_at': now().isoformat()} }}"
+  - *emit_diagnostic

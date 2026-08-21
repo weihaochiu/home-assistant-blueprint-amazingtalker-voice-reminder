@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**目前 Blueprint 版本：v0.4.1**
+**目前 Blueprint 版本：v0.5.0**
 
 **最低 Home Assistant：2026.1.0**
 
@@ -22,6 +22,7 @@
 - 優先以 ICS UID 確認；沒有 UID 時使用 calendar/start/end/summary。
 - 合併同時間課程及同一檢查時間的不同剩餘分鐘。
 - 多播放器錯誤隔離、分別恢復原音量、選擇性 Announcement 媒體恢復。
+- 可選、隱私安全的結構化診斷紀錄；同次有效執行共用 run ID，空白分鐘 heartbeat 完全不寫 log。
 
 ## 系統需求
 
@@ -268,6 +269,10 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 | `enable_pre_class_refresh` | `true` | 到刷新點時只更新含課程的 calendar。 |
 | `pre_class_refresh_minutes` | `60` | 課前重新同步分鐘數。 |
 | `verify_before_each_reminder` | `true` | 每段播放前再更新確認；失敗跳過受影響提醒。 |
+| `enable_diagnostic_logging` | `false` | 寫結構化 diagnostic events 到 Home Assistant system log；關閉時既有 warning 仍保留。 |
+| `diagnostic_log_level` | `normal` | `normal` 只記有意義動作；`debug` 增加 query／計數／狀態，但空 heartbeat 仍不記。 |
+| `diagnostic_log_retention_days` | `7` | 只作 metadata policy hint；Blueprint 無法控制 system log 或實體檔案 retention。 |
+| `diagnostic_privacy_mode` | `safe` | `safe` 不含學員／summary；`detailed` 可含兩者，但所有模式都不記 URL 或憑證。 |
 
 未來新增選填 input 時會提供 default，避免既有 automation 因缺少新欄位而無法載入。
 
@@ -288,7 +293,7 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 
 本版已移除舊的 `update_time`、`update_weekday`、`update_month_day` inputs 與 scalar 排程 runtime。依 Home Assistant 2026.1.0 官方 source，[Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) 允許 automation 中存在額外的已儲存 input key，而 [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) 只檢查新版 Blueprint 是否缺少必要 input；因此這三個 stale keys 會被忽略，不會單獨造成 automation 或 Blueprint 載入失敗。
 
-舊 automation 內的 `update_frequency: daily`、`weekly` 或 `monthly` scalar 無法確認新版星期／日期選擇，所以本版會 fail-safe 停止**定期強制更新**，不會偷偷改成星期一、每天 07:00 或其他預設。若定期強制更新仍啟用且 scalar 尚未遷移，v0.4.1 會在本地時間 `00:00` 寫入 `system_log` migration warning，正常情況每天最多一次。早晨摘要、課前重新同步、提醒、verification 與 TTS 仍是獨立流程。
+舊 automation 內的 `update_frequency: daily`、`weekly` 或 `monthly` scalar 無法確認新版星期／日期選擇，所以本版會 fail-safe 停止**定期強制更新**，不會偷偷改成星期一、每天 07:00 或其他預設。若定期強制更新仍啟用且 scalar 尚未遷移，v0.5.0 會在本地時間 `00:00` 寫入 `system_log` migration warning，正常情況每天最多一次。早晨摘要、課前重新同步、提醒、verification 與 TTS 仍是獨立流程。
 
 更新 Blueprint 後請：
 
@@ -336,7 +341,7 @@ https://github.com/weihaochiu/home-assistant-blueprint-amazingtalker-voice-remin
 
 選 1 個時固定使用；選 2 個以上時，每次最後確認成功且真正需要播報時純 random 一次，允許連續抽到同一句。同一 playback 合併的所有 reminder offset 使用同一 style；`{names}` 與 `{minutes}` 仍由系統動態代入。
 
-`names` 來自 `spoken_name`，用來區分 AmazingTalker Calendar／帳號。v0.4.1 不從 event summary 解析老師名稱；summary 仍保留於取消／改期確認所需的 fallback event identity。
+`names` 來自 `spoken_name`，用來區分 AmazingTalker Calendar／帳號。v0.5.0 不從 event summary 解析老師名稱；summary 仍保留於取消／改期確認所需的 fallback event identity。
 
 Home Assistant 無法從任意長度 input 動態產生 calendar triggers，因此使用每分鐘 heartbeat。每次開始保存 `check_time` 與固定比較分鐘；舊 parallel 執行不會延遲後改用新的 `now()`。
 
@@ -369,6 +374,18 @@ Remote Calendar 內部保有 UID，但官方 `calendar.get_events` 目前不回�
 - Music Assistant Announcement 通常較可靠，仍取決於 provider/player。
 - 多品牌播放器開始與結束可能不同步。
 
+## 診斷紀錄
+
+診斷預設關閉。發生問題時，到「**設定 → 自動化與場景**」開啟由本 Blueprint 建立的 automation，展開「**診斷紀錄與除錯**」，啟用 logging、選 `debug`、重現一次問題，完成後再關閉或改回 `normal`。
+
+每筆紀錄是 Home Assistant raw system log 中的一行 JSON，logger 固定為 `blueprints.weihaochiu.amazingtalker_voice_reminder`。`20260821T183000000000-heartbeat` 形式的 run ID 可串起同次 scheduled refresh、快取 query、指定刷新、verification、TTS、逐台播放與音量恢復。官方 action 沒有 success response 時只記 `action_dispatched` 或 `unknown`；程式繼續執行不會被當成成功證據。
+
+`safe` 只含 entity ID、計數、時間、剩餘分鐘、可觀察 refresh/player state 與結果，不含學員名稱或 event summary。`detailed` 可增加這兩項，但仍永遠不會序列化 Remote Calendar URL、token、authorization、cookie、password 或 integration config。兩種模式都不記完整 TTS 文字。
+
+到「**設定 → 系統 → 紀錄**」查看 full raw log，搜尋固定 logger 或 run ID；condensed view 主要只保留近期 warning/error。Safe mode 的設計可直接交給 ChatGPT/Codex 分析，但分享前仍建議人工快速確認；Detailed mode 分享前必須人工檢查。
+
+`diagnostic_log_retention_days` 只會寫在 flow header 當 policy hint，**不會**真的 rotate 或刪除 log。純 Blueprint 沒有 filesystem API；File integration 指向使用者預先建立的固定檔案；Recorder retention 管理資料庫而非文字 log；通用 Blueprint 也不能安全安裝 `shell_command`。完整 event code、取得方式、隱私規則與 retention 邊界見 [診斷紀錄說明](docs/DIAGNOSTIC_LOGGING.md)。
+
 ## 隱私與安全
 
 - AmazingTalker Calendar URL 視同密碼。
@@ -385,6 +402,7 @@ Remote Calendar 內部保有 UID，但官方 `calendar.get_events` 目前不回�
 - **音量不準：** 播放器可能缺 `volume_level`、播放超過等待上限或狀態不可靠。
 - **媒體不恢復：** 若整合不正確支援 Announcement，關閉 `attempt_media_resume`。
 - **新課未發現：** 等待或強制 calendar 更新，並見已知限制。
+- **收集診斷：** 開啟 `debug`、重現一次、依 run ID 搜尋 raw system log，完成後關閉 debug。
 
 ## 測試方法
 
@@ -408,8 +426,8 @@ Linux/macOS 用 `.venv/bin/python`。實機步驟見 [docs/MANUAL_TEST_CHECKLIST
 
 重新匯入後開啟 automation 編輯頁，確認同時看得到：
 
-- Blueprint 標題：`AmazingTalker 多學員課程語音提醒 · v0.4.1`
-- 第一個 section description：`目前 Blueprint：v0.4.1`
+- Blueprint 標題：`AmazingTalker 多學員課程語音提醒 · v0.5.0`
+- 第一個 section description：`目前 Blueprint：v0.5.0`
 
 若仍顯示舊版，請到「設定（Settings）→ 自動化與場景（Automations & scenes）→ Blueprint」，開啟 AmazingTalker Blueprint 的三點選單，選擇「重新匯入 Blueprint（Re-import blueprint）」，再重新開啟 automation。這是 Home Assistant 官方文件列出的社群 Blueprint 更新方式。
 
@@ -421,12 +439,14 @@ Linux/macOS 用 `.venv/bin/python`。實機步驟見 [docs/MANUAL_TEST_CHECKLIST
 - 課程改到更早且刷新時已錯過提醒點，不補發過去提醒。
 - 純 Blueprint 沒有持久 event ledger，無法防止完全同分鐘外部重複觸發。
 - TTS 結束、音量/媒體恢復與 HomePod 行為皆為播放器相關 best effort。
+- `diagnostic_log_retention_days` 只是 metadata hint；Blueprint 無法建立每日檔案或執行 N-day cleanup。
+- Home Assistant system log rotation 與任何 File notification retention 均由安裝環境管理。
 - 最終 runtime 仍需在使用者真實 Home Assistant、TTS、calendar 與播放器驗證。
 
 ## 官方技術依據
 
-只依據官方來源：[AmazingTalker Calendar 說明](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar)、[Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/)、[selectors](https://www.home-assistant.io/docs/blueprint/selectors/)、[Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/)、[`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/)、[TTS](https://www.home-assistant.io/integrations/tts)、[`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/) 與 [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/)。
+只依據官方來源：[AmazingTalker Calendar 說明](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar)、[Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/)、[selectors](https://www.home-assistant.io/docs/blueprint/selectors/)、[Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/)、[`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/)、[TTS](https://www.home-assistant.io/integrations/tts)、[`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/)、[System Log](https://www.home-assistant.io/integrations/system_log/)、[Automation trace](https://www.home-assistant.io/docs/automation/troubleshooting/)、[File](https://www.home-assistant.io/integrations/file)、[Recorder](https://www.home-assistant.io/integrations/recorder)、[Shell Command](https://www.home-assistant.io/integrations/shell_command) 與 [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/)。
 
 ## 版本與 License
 
-目前 Blueprint 版本：`v0.4.1`，見 [CHANGELOG.md](CHANGELOG.md)。[MIT](LICENSE) © 2026 weihaochiu。
+目前 Blueprint 版本：`v0.5.0`，見 [CHANGELOG.md](CHANGELOG.md)。[MIT](LICENSE) © 2026 weihaochiu。

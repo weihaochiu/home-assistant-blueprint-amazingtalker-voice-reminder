@@ -5,8 +5,8 @@
 ## 測試前準備
 
 - [ ] Home Assistant 2026.1.0 以上，且已備份 automation。
-- [ ] Blueprint 標題顯示「AmazingTalker 多學員課程語音提醒 · v0.4.1」。
-- [ ] 第一個 section description 顯示「目前 Blueprint：v0.4.1」。
+- [ ] Blueprint 標題顯示「AmazingTalker 多學員課程語音提醒 · v0.5.0」。
+- [ ] 第一個 section description 顯示「目前 Blueprint：v0.5.0」。
 - [ ] 已建立測試 TTS；第一輪使用 Google Translate TTS。
 - [ ] 已選至少一台播放器；HomePod Mini 先確認 Apple TV 整合可播放一般媒體。
 - [ ] 「設定 → 系統 → 網路」本機 URL 可由播放器存取。
@@ -82,6 +82,24 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 Ca
 - [ ] 失敗時看到條件與提醒跳過，並檢查 system log warning。
 - [ ] 無課/無播放器在改音量前安全結束。
 - [ ] 分享 trace 前遮蔽私人資料。
+
+## 診斷紀錄
+
+- [ ] 更新既有 automation 後，新 diagnostic inputs 都顯示安全 defaults：off／normal／safe／7。
+- [ ] Diagnostic logging 關閉時，早晨摘要、課前提醒、刷新、verification、TTS 與音量恢復行為不變。
+- [ ] Diagnostic logging 關閉時，legacy migration 與 verification failure warning 仍寫入 system log。
+- [ ] Normal 模式只在 scheduled refresh、morning flow、refresh、candidate、verification 或 playback 等有意義流程寫入。
+- [ ] Debug 模式在 query horizon 內有 cached event 時增加 query/count/state details。
+- [ ] Normal 與 Debug 都不為完全空白 heartbeat 寫入 `AUTOMATION_START`、`HEARTBEAT_ACTIONABLE` 或 `CALENDAR_QUERY_RESULT`。
+- [ ] 同次 execution 的所有 JSON lines 使用完全相同 `run_id`。
+- [ ] 每行都有 `timestamp`、`version`、`run_id`、`trigger`、`level`、`event` 與 `result`。
+- [ ] Calendar refresh 的 `completed` 只在 `last_reported` 前進時出現；未前進為 `failed`。
+- [ ] Player action 沒有 success response 時顯示 `action_dispatched`，不顯示假的 `success`。
+- [ ] 沒有 `volume_level` 時記 `restore_skipped`／`no_volume_level`。
+- [ ] Safe mode 沒有 learner name、event summary 或完整 TTS message。
+- [ ] Detailed mode 可出現測試 learner/summary，但仍沒有 Calendar URL、token、cookie、password 或 authorization。
+- [ ] Full raw system log 可依固定 logger 與 run ID 找到一次完整 flow。
+- [ ] UI 與文件明確顯示 retention days 只是 hint，沒有自動檔案 cleanup。
 
 ## 音量恢復
 

@@ -2,7 +2,7 @@
 
 [繁體中文](README.zh-TW.md)
 
-**Current Blueprint version: v0.4.1**
+**Current Blueprint version: v0.5.0**
 
 **Minimum Home Assistant: 2026.1.0**
 
@@ -24,6 +24,7 @@ This is an independent community project. It is not an official AmazingTalker pr
 - Match by ICS UID, with calendar/start/end/summary fallback when UID is absent.
 - Merge simultaneous lessons and different offsets into one playback request with natural sentences.
 - Independent multi-player playback, per-player volume restoration, and optional announcement resume.
+- Opt-in, privacy-safe structured diagnostics with one run ID across each meaningful execution; empty minute heartbeats stay silent.
 
 ## Requirements
 
@@ -270,6 +271,10 @@ Then select **Create automation**, add at least one learner and player, choose a
 | `enable_pre_class_refresh` | `true` | Refresh only calendars whose cached lesson reaches the refresh point. |
 | `pre_class_refresh_minutes` | `60` | Minutes before class for targeted refresh. |
 | `verify_before_each_reminder` | `true` | Refresh and confirm immediately before playback; failure skips the affected reminder. |
+| `enable_diagnostic_logging` | `false` | Write structured diagnostic events to the Home Assistant system log; existing warnings remain active while off. |
+| `diagnostic_log_level` | `normal` | `normal` records meaningful actions; `debug` adds query/count/state details without empty-heartbeat noise. |
+| `diagnostic_log_retention_days` | `7` | Metadata hint only; a Blueprint cannot control system-log or physical-file retention. |
+| `diagnostic_privacy_mode` | `safe` | `safe` omits learner/summary; `detailed` may include them, but neither mode logs URLs or credentials. |
 
 Future optional inputs will have defaults so existing automations do not fail because a new field is missing.
 
@@ -289,7 +294,7 @@ The scheduled forced refresh only makes an additional Remote Calendar update req
 
 This release removes the old `update_time`, `update_weekday`, and `update_month_day` inputs and scalar schedule runtime. The official Home Assistant 2026.1.0 [Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) permits extra stored input keys, while [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) only rejects missing inputs declared by the new Blueprint. Those three stale keys are therefore ignored and do not by themselves invalidate the automation or Blueprint.
 
-An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. While scheduled refresh is enabled and the scalar remains, v0.4.1 writes a migration warning to `system_log` at local `00:00`, normally at most once per day. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
+An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. While scheduled refresh is enabled and the scalar remains, v0.5.0 writes a migration warning to `system_log` at local `00:00`, normally at most once per day. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
 
 After updating the Blueprint:
 
@@ -335,7 +340,7 @@ The pre-class list also shows complete examples:
 
 One selected style stays fixed. Two or more use pure random once after final verification for each actual playback; consecutive repeats are allowed. Every sentence in one merged playback uses the same selected style, while `{names}` and `{minutes}` remain dynamic.
 
-`names` comes from `spoken_name` and identifies the AmazingTalker Calendar/account. v0.4.1 does not parse a teacher name from the event summary. The summary remains part of the fallback event identity used for cancellation and reschedule verification.
+`names` comes from `spoken_name` and identifies the AmazingTalker Calendar/account. v0.5.0 does not parse a teacher name from the event summary. The summary remains part of the fallback event identity used for cancellation and reschedule verification.
 
 A one-minute heartbeat is required because Home Assistant cannot dynamically create calendar triggers from an arbitrary-length Blueprint input. Each run captures `check_time` and a fixed minute anchor, so a delayed older run never substitutes a new `now()`.
 
@@ -368,6 +373,18 @@ With restoration enabled, the Blueprint estimates a minimum speech duration, wai
 - Music Assistant Announcement generally has stronger resume support, but results still depend on provider and player.
 - Multi-brand players may start and finish at different times.
 
+## Diagnostic logging
+
+Diagnostics are off by default. To troubleshoot, open **Settings → Automations & scenes**, edit the automation created from this Blueprint, expand **診斷紀錄與除錯**, enable logging, select `debug`, reproduce the issue, then return logging to off or `normal`.
+
+Every entry is one JSON object in the Home Assistant raw system log under logger `blueprints.weihaochiu.amazingtalker_voice_reminder`. A run ID such as `20260821T183000000000-heartbeat` correlates scheduled refresh, cached query, targeted refresh, verification, TTS, player, and restore steps from one execution. Actions without an official success response use `action_dispatched` or `unknown`; continuing after an action is never reported as proof of success.
+
+`safe` mode includes entity IDs, counts, times, remaining minutes, observable refresh/player state, and results. It omits learner names and event summaries. `detailed` may add those two fields, but still never serializes a Remote Calendar URL, token, authorization data, cookie, password, or integration config. Full TTS text is not logged in either mode.
+
+Open **Settings → System → Logs** and use the full raw log to find the logger or run ID; the condensed view primarily retains recent warnings/errors. Safe-mode entries are designed for sharing with ChatGPT/Codex, although a final human review is still prudent. Review detailed-mode output manually before sharing.
+
+The `diagnostic_log_retention_days` value is only written into the diagnostic header as a policy hint. It does **not** rotate or delete logs. A pure Blueprint has no filesystem API, the File integration targets a user-created fixed file, Recorder retention applies to the database rather than text logs, and a portable Blueprint cannot safely install a `shell_command`. See [Diagnostic Logging](docs/DIAGNOSTIC_LOGGING.md) for event codes, collection steps, privacy rules, and the exact retention boundary.
+
 ## Privacy and security
 
 - Treat the AmazingTalker Calendar URL like a password.
@@ -384,6 +401,7 @@ With restoration enabled, the Blueprint estimates a minimum speech duration, wai
 - **Volume mismatch:** the player may omit `volume_level`, exceed the bounded wait, or report TTS state unreliably.
 - **No media resume:** disable `attempt_media_resume` if Announcement is not implemented correctly.
 - **New lesson missing:** wait for or force a calendar update; see limitations.
+- **Diagnostic collection:** enable `debug`, reproduce once, search the raw system log for the run ID, then disable debug.
 
 ## Test
 
@@ -407,8 +425,8 @@ This Blueprint does not automatically check for or install updates. The displaye
 
 After re-importing, open the automation editor and confirm both visible markers:
 
-- Blueprint title: `AmazingTalker 多學員課程語音提醒 · v0.4.1`
-- First section description: `目前 Blueprint：v0.4.1`
+- Blueprint title: `AmazingTalker 多學員課程語音提醒 · v0.5.0`
+- First section description: `目前 Blueprint：v0.5.0`
 
 If an older version is still shown, go to **Settings → Automations & scenes → Blueprints**, select the three-dot menu for the AmazingTalker Blueprint, choose **Re-import blueprint**, and then reopen the automation. Home Assistant documents this as the supported update path for imported community Blueprints.
 
@@ -420,12 +438,14 @@ If an older version is still shown, go to **Settings → Automations & scenes �
 - If a lesson moves earlier and refresh occurs after a reminder point, past reminders are not backfilled.
 - Pure Blueprint state cannot provide a persistent event ledger for exact-minute external duplicate triggers.
 - TTS end detection, volume restoration, media resume, and HomePod behavior are player-dependent best efforts.
+- `diagnostic_log_retention_days` is a metadata hint only; this Blueprint cannot create daily files or enforce N-day cleanup.
+- Home Assistant system-log rotation and any optional file-notification retention are installation-managed.
 - Final runtime behavior needs the user's real Home Assistant, TTS provider, calendars, and speakers.
 
 ## Technical basis
 
-Only official sources are used: [AmazingTalker calendar instructions](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar), [Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/), [selectors](https://www.home-assistant.io/docs/blueprint/selectors/), [Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/), [`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/), [TTS](https://www.home-assistant.io/integrations/tts), [`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/), and [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/).
+Only official sources are used: [AmazingTalker calendar instructions](https://amazingtalker.elevio.help/en/articles/248-how-do-i-connect-with-my-online-calendar), [Blueprint schema](https://www.home-assistant.io/docs/blueprint/schema/), [selectors](https://www.home-assistant.io/docs/blueprint/selectors/), [Remote Calendar](https://www.home-assistant.io/integrations/remote_calendar/), [`calendar.get_events`](https://www.home-assistant.io/actions/calendar.get_events/), [TTS](https://www.home-assistant.io/integrations/tts), [`media_player.play_media`](https://www.home-assistant.io/actions/media_player.play_media/), [System Log](https://www.home-assistant.io/integrations/system_log/), [automation traces](https://www.home-assistant.io/docs/automation/troubleshooting/), [File](https://www.home-assistant.io/integrations/file), [Recorder](https://www.home-assistant.io/integrations/recorder), [Shell Command](https://www.home-assistant.io/integrations/shell_command), and [Music Assistant announcements](https://www.music-assistant.io/faq/announcement/).
 
 ## Version and license
 
-Current Blueprint version: `v0.4.1`; see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.
+Current Blueprint version: `v0.5.0`; see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.
