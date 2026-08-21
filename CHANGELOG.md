@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## v0.4.1 - 2026-08-21
+
+### Changed
+
+- Replaced abstract phrase names with complete spoken sentence examples in the Blueprint UI.
+- Changed morning and pre-class phrase selectors from dropdown/chip presentation to the native list-style multi-select UI where supported by Home Assistant.
+- Kept existing stable machine IDs so existing v0.4.0 automation selections remain compatible.
+- Clarified that Grace and 30 minutes are examples only.
+
+### Fixed
+
+- Improved spacing in the short pre-class reminder: “別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。”
+
 ## v0.4.0 - 2026-08-21
 
 ### Added

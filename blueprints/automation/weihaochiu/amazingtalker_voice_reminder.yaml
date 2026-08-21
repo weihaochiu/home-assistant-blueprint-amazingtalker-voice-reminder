@@ -1,7 +1,7 @@
 blueprint:
-  name: AmazingTalker 多學員課程語音提醒 · v0.4.0
+  name: AmazingTalker 多學員課程語音提醒 · v0.4.1
   description: >-
-    版本：v0.4.0。最低 Home Assistant：2026.1.0。
+    版本：v0.4.1。最低 Home Assistant：2026.1.0。
     AmazingTalker Multi-Learner Voice Reminder。從多個 Remote Calendar 行事曆讀取課程，
     提供每日摘要、可自訂課前提醒、取消/改期前重新確認、多播放器播報與個別音量恢復。
     本專案非 AmazingTalker 官方專案。AmazingTalker Calendar URL 是私人讀取網址，請勿公開。
@@ -16,7 +16,7 @@ blueprint:
       name: 學員行事曆
       icon: mdi:calendar-account
       description: >-
-        目前 Blueprint：v0.4.0。每位學員需先建立一個 Remote Calendar。至少新增一筆。
+        目前 Blueprint：v0.4.1。每位學員需先建立一個 Remote Calendar。至少新增一筆。
         Calendar URL 是私人讀取網址，不可貼到 GitHub、Issue 或公開論壇。
       input:
         learners:
@@ -234,25 +234,25 @@ blueprint:
         morning_intro_styles:
           name: 早晨開場語句
           description: >-
-            可複選。選 1 個時固定使用；選 2 個以上時，每次實際播報都從所選語句中
-            隨機選 1 個。純隨機，允許連續兩次抽到相同語句。
+            可複選下方完整播報句子。選 1 個時固定播放；選 2 個以上時，每次實際播報
+            隨機選擇其中 1 個。純隨機，因此可能連續兩次播放相同句子。
           default:
             - morning_standard
           selector:
             select:
               multiple: true
               custom_value: false
-              mode: dropdown
+              mode: list
               options:
-                - label: 標準早安提醒
+                - label: 早安提醒，今天有 AmazingTalker 課程。
                   value: morning_standard
-                - label: 今日課程安排
+                - label: 早安，今天的 AmazingTalker 課程安排如下。
                   value: morning_schedule
-                - label: 今日課程時間
+                - label: 今天有 AmazingTalker 課程，以下是今天的課程時間。
                   value: morning_today_courses
-                - label: 新的一天
+                - label: 新的一天開始了，今天的 AmazingTalker 課程安排如下。
                   value: morning_new_day
-                - label: 簡短早安提醒
+                - label: 早安，以下是今天的 AmazingTalker 課程時間。
                   value: morning_brief
 
     reminder_section:
@@ -268,25 +268,27 @@ blueprint:
         pre_class_message_styles:
           name: 課前提醒語句
           description: >-
-            可複選。選 1 個固定使用；選 2 個以上時，每次實際課前播報從所選語句中
-            隨機選 1 個。純隨機，允許連續兩次抽到相同語句。
+            下列句子使用「Grace」與「30分鐘」作為範例。實際播報時會自動代入該
+            AmazingTalker Calendar 的「TTS 播報名稱」與實際剩餘分鐘數。可複選。
+            選 1 個固定播放；選 2 個以上時，每次實際播報隨機選擇其中 1 個。
+            純隨機，因此可能連續兩次播放相同句子。
           default:
             - preclass_standard
           selector:
             select:
               multiple: true
               custom_value: false
-              mode: dropdown
+              mode: list
               options:
-                - label: 標準提醒
+                - label: 提醒您，Grace 的 AmazingTalker 課程將在30分鐘後開始。
                   value: preclass_standard
-                - label: 教材提醒
+                - label: 記得準備教材，再過30分鐘，Grace 的 AmazingTalker 課程就要開始了。
                   value: preclass_material
-                - label: 課程即將開始
+                - label: 課程提醒，Grace 的 AmazingTalker 課程再過30分鐘就要開始了。
                   value: preclass_coming
-                - label: 準備上課
+                - label: 準備上課囉，Grace 的 AmazingTalker 課程將在30分鐘後開始。
                   value: preclass_ready
-                - label: 簡短提醒
+                - label: 別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。
                   value: preclass_short
         reminder_offsets:
           name: 課前提醒段數
@@ -402,7 +404,7 @@ variables:
       'preclass_material': '記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。',
       'preclass_coming': '課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。',
       'preclass_ready': '準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。',
-      'preclass_short': '別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。'
+      'preclass_short': '別忘了，{minutes}分鐘後有 {names} 的 AmazingTalker 課程。'
     } -}}
   selected_pre_class_styles: >-
     {%- set allowed = [
@@ -564,7 +566,7 @@ actions:
           level: warning
           logger: blueprints.weihaochiu.amazingtalker_voice_reminder
           message: >-
-            AmazingTalker Voice Reminder v0.4.0 detected a legacy scheduled-refresh
+            AmazingTalker Voice Reminder v0.4.1 detected a legacy scheduled-refresh
             value. Scheduled refresh is disabled for safety until this automation is
             opened, a new daily/weekly/monthly Update Schedule is selected, and the
             automation is saved. Morning summaries and pre-class reminders remain active.

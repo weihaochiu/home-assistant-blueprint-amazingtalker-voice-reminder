@@ -2,7 +2,7 @@
 
 [繁體中文](README.zh-TW.md)
 
-**Current Blueprint version: v0.4.0**
+**Current Blueprint version: v0.4.1**
 
 **Minimum Home Assistant: 2026.1.0**
 
@@ -289,7 +289,7 @@ The scheduled forced refresh only makes an additional Remote Calendar update req
 
 This release removes the old `update_time`, `update_weekday`, and `update_month_day` inputs and scalar schedule runtime. The official Home Assistant 2026.1.0 [Blueprint instance schema](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/schemas.py) permits extra stored input keys, while [`BlueprintInputs`](https://github.com/home-assistant/core/blob/2026.1.0/homeassistant/components/blueprint/models.py) only rejects missing inputs declared by the new Blueprint. Those three stale keys are therefore ignored and do not by themselves invalidate the automation or Blueprint.
 
-An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. While scheduled refresh is enabled and the scalar remains, v0.4.0 writes a migration warning to `system_log` at local `00:00`, normally at most once per day. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
+An old `update_frequency: daily`, `weekly`, or `monthly` scalar cannot describe the new weekday or month-day selections. The runtime fails safe by disabling **scheduled refresh** until a structured schedule is saved; it does not silently choose Monday, daily at 07:00, or another default. While scheduled refresh is enabled and the scalar remains, v0.4.1 writes a migration warning to `system_log` at local `00:00`, normally at most once per day. Morning summaries, pre-class refresh, reminders, verification, and TTS remain independent.
 
 After updating the Blueprint:
 
@@ -305,33 +305,37 @@ There is no need to remove stale inputs by manually editing YAML; save the struc
 
 At the selected local time, `calendar.get_events` queries local 00:00 through the next local 00:00. Timed events are sorted by start and learner; all lessons are spoken. Name fallback is non-blank `spoken_name`, calendar `friendly_name`, then entity ID without `calendar.`. Times are natural: `08:00` → `早上8點`, `13:30` → `下午1點30分`, `20:00` → `晚上8點`. With no lessons, volume and TTS are untouched.
 
-The morning opening selector includes these built-in phrases:
+The native list-style multi-select shows complete built-in sentences instead of abstract style names:
 
-| ID | UI label | Spoken text |
-| --- | --- | --- |
-| `morning_standard` | 標準早安提醒 | 早安提醒，今天有 AmazingTalker 課程。 |
-| `morning_schedule` | 今日課程安排 | 早安，今天的 AmazingTalker 課程安排如下。 |
-| `morning_today_courses` | 今日課程時間 | 今天有 AmazingTalker 課程，以下是今天的課程時間。 |
-| `morning_new_day` | 新的一天 | 新的一天開始了，今天的 AmazingTalker 課程安排如下。 |
-| `morning_brief` | 簡短早安提醒 | 早安，以下是今天的 AmazingTalker 課程時間。 |
+```text
+☑ 早安提醒，今天有 AmazingTalker 課程。
+☑ 早安，今天的 AmazingTalker 課程安排如下。
+☐ 今天有 AmazingTalker 課程，以下是今天的課程時間。
+☐ 新的一天開始了，今天的 AmazingTalker 課程安排如下。
+☐ 早安，以下是今天的 AmazingTalker 課程時間。
+```
+
+The check marks above illustrate a possible selection. Home Assistant renders this through its native `select` selector with `multiple: true` and `mode: list`; no custom card or component is required. Stored values remain `morning_standard`, `morning_schedule`, `morning_today_courses`, `morning_new_day`, and `morning_brief`, so v0.4.0 selections remain compatible.
 
 Selecting one phrase keeps it fixed. Selecting two or more uses pure random once per actual morning playback; the same phrase may be selected on consecutive playbacks. Only the opening changes—the dynamic learner and course-time text still comes from the calendar. With no timed lessons, the Blueprint does not select or play an opening.
 
 ## Pre-class reminders and cancellation checks
 
-The pre-class selector includes these built-in sentence styles:
+The pre-class list also shows complete examples:
 
-| ID | UI label | Template |
-| --- | --- | --- |
-| `preclass_standard` | 標準提醒 | 提醒您，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
-| `preclass_material` | 教材提醒 | 記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。 |
-| `preclass_coming` | 課程即將開始 | 課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。 |
-| `preclass_ready` | 準備上課 | 準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。 |
-| `preclass_short` | 簡短提醒 | 別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。 |
+```text
+☑ 提醒您，Grace 的 AmazingTalker 課程將在30分鐘後開始。
+☑ 記得準備教材，再過30分鐘，Grace 的 AmazingTalker 課程就要開始了。
+☐ 課程提醒，Grace 的 AmazingTalker 課程再過30分鐘就要開始了。
+☐ 準備上課囉，Grace 的 AmazingTalker 課程將在30分鐘後開始。
+☐ 別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。
+```
+
+`Grace` and `30 minutes` are UI examples only. Actual playback substitutes the selected Calendar/account's `spoken_name` and the real remaining minutes. Stored values remain `preclass_standard`, `preclass_material`, `preclass_coming`, `preclass_ready`, and `preclass_short`, preserving v0.4.0 saved selections.
 
 One selected style stays fixed. Two or more use pure random once after final verification for each actual playback; consecutive repeats are allowed. Every sentence in one merged playback uses the same selected style, while `{names}` and `{minutes}` remain dynamic.
 
-`names` comes from `spoken_name` and identifies the AmazingTalker Calendar/account. v0.4.0 does not parse a teacher name from the event summary. The summary remains part of the fallback event identity used for cancellation and reschedule verification.
+`names` comes from `spoken_name` and identifies the AmazingTalker Calendar/account. v0.4.1 does not parse a teacher name from the event summary. The summary remains part of the fallback event identity used for cancellation and reschedule verification.
 
 A one-minute heartbeat is required because Home Assistant cannot dynamically create calendar triggers from an arbitrary-length Blueprint input. Each run captures `check_time` and a fixed minute anchor, so a delayed older run never substitutes a new `now()`.
 
@@ -397,12 +401,14 @@ On Linux/macOS use `.venv/bin/python`. See [the Traditional Chinese manual check
 
 Open **Settings → Automations & scenes → Blueprints**, open this Blueprint's menu, and choose **Re-import Blueprint**. Automations with an old scalar schedule must then reselect the structured schedule as described under “Upgrading an old schedule.”
 
+This Blueprint does not automatically check for or install updates. The displayed version only identifies the Blueprint currently loaded by Home Assistant. Updating remains a manual **Re-import Blueprint** action.
+
 ### How to confirm that the Blueprint is updated
 
 After re-importing, open the automation editor and confirm both visible markers:
 
-- Blueprint title: `AmazingTalker 多學員課程語音提醒 · v0.4.0`
-- First section description: `目前 Blueprint：v0.4.0`
+- Blueprint title: `AmazingTalker 多學員課程語音提醒 · v0.4.1`
+- First section description: `目前 Blueprint：v0.4.1`
 
 If an older version is still shown, go to **Settings → Automations & scenes → Blueprints**, select the three-dot menu for the AmazingTalker Blueprint, choose **Re-import blueprint**, and then reopen the automation. Home Assistant documents this as the supported update path for imported community Blueprints.
 
@@ -422,4 +428,4 @@ Only official sources are used: [AmazingTalker calendar instructions](https://am
 
 ## Version and license
 
-Current Blueprint version: `v0.4.0`; see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.
+Current Blueprint version: `v0.4.1`; see [CHANGELOG.md](CHANGELOG.md). Licensed under [MIT](LICENSE), © 2026 weihaochiu.

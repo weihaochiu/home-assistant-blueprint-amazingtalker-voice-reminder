@@ -57,8 +57,16 @@ PRECLASS_PHRASES = {
     "preclass_material": "記得準備教材，再過{minutes}分鐘，{names} 的 AmazingTalker 課程就要開始了。",
     "preclass_coming": "課程提醒，{names} 的 AmazingTalker 課程再過{minutes}分鐘就要開始了。",
     "preclass_ready": "準備上課囉，{names} 的 AmazingTalker 課程將在{minutes}分鐘後開始。",
-    "preclass_short": "別忘了，{minutes}分鐘後有{names} 的 AmazingTalker 課程。",
+    "preclass_short": "別忘了，{minutes}分鐘後有 {names} 的 AmazingTalker 課程。",
 }
+MORNING_UI_LABELS = list(MORNING_PHRASES.values())
+PRECLASS_UI_LABELS = [
+    "提醒您，Grace 的 AmazingTalker 課程將在30分鐘後開始。",
+    "記得準備教材，再過30分鐘，Grace 的 AmazingTalker 課程就要開始了。",
+    "課程提醒，Grace 的 AmazingTalker 課程再過30分鐘就要開始了。",
+    "準備上課囉，Grace 的 AmazingTalker 課程將在30分鐘後開始。",
+    "別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。",
+]
 
 
 class InputRef(str):
@@ -406,7 +414,7 @@ def player_plan(
 
 def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
     metadata = blueprint["blueprint"]
-    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒 · v0.4.0"
+    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒 · v0.4.1"
     assert metadata["domain"] == "automation"
     assert metadata["author"] == "weihaochiu"
     assert metadata["source_url"] == SOURCE_URL
@@ -414,7 +422,7 @@ def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
 
 
 def test_version_is_consistent_across_release_surfaces(blueprint: dict) -> None:
-    assert VERSION == "0.4.0"
+    assert VERSION == "0.4.1"
     displayed = f"v{VERSION}"
     metadata = blueprint["blueprint"]
     assert displayed in metadata["name"]
@@ -508,20 +516,47 @@ def test_choose_schedule_selector_schema_and_conditional_fields(blueprint: dict)
     }
 
 
-def test_phrase_selector_schemas_defaults_and_ids(blueprint: dict) -> None:
+def test_phrase_selector_schemas_defaults_ids_and_full_labels(blueprint: dict) -> None:
     inputs = flatten_inputs(blueprint["blueprint"]["input"])
     cases = (
-        ("morning_intro_styles", "morning_standard", MORNING_STYLE_IDS),
-        ("pre_class_message_styles", "preclass_standard", PRECLASS_STYLE_IDS),
+        (
+            "morning_intro_styles",
+            "morning_standard",
+            MORNING_STYLE_IDS,
+            MORNING_UI_LABELS,
+        ),
+        (
+            "pre_class_message_styles",
+            "preclass_standard",
+            PRECLASS_STYLE_IDS,
+            PRECLASS_UI_LABELS,
+        ),
     )
-    for input_id, default_id, expected_ids in cases:
+    for input_id, default_id, expected_ids, expected_labels in cases:
         definition = inputs[input_id]
         selector = definition["selector"]["select"]
         assert selector["multiple"] is True
         assert selector["custom_value"] is False
-        assert selector["mode"] == "dropdown"
+        assert selector["mode"] == "list"
         assert definition["default"] == [default_id]
         assert [option["value"] for option in selector["options"]] == expected_ids
+        assert [option["label"] for option in selector["options"]] == expected_labels
+
+
+def test_v040_saved_phrase_machine_ids_remain_compatible(blueprint: dict) -> None:
+    context = render_global_phrase_variables(
+        blueprint,
+        morning_intro_styles_input=["morning_standard", "morning_new_day"],
+        pre_class_message_styles_input=["preclass_standard", "preclass_short"],
+    )
+    assert context["selected_morning_styles"] == [
+        "morning_standard",
+        "morning_new_day",
+    ]
+    assert context["selected_pre_class_styles"] == [
+        "preclass_standard",
+        "preclass_short",
+    ]
 
 
 def test_phrase_maps_are_centralized_and_exact(blueprint: dict) -> None:
@@ -974,7 +1009,7 @@ def test_phrase_style_normalization_filters_unknown_ids_and_duplicates(
         ),
         (
             "preclass_short",
-            "別忘了，30分鐘後有Grace 的 AmazingTalker 課程。",
+            "別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。",
         ),
     ],
 )
@@ -1062,8 +1097,8 @@ def test_same_preclass_style_is_used_for_every_offset_in_one_playback(
     )
     assert len(calls) == 1
     assert message == (
-        "別忘了，30分鐘後有Grace 的 AmazingTalker 課程。"
-        "別忘了，10分鐘後有Amy 的 AmazingTalker 課程。"
+        "別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。"
+        "別忘了，10分鐘後有 Amy 的 AmazingTalker 課程。"
     )
 
 

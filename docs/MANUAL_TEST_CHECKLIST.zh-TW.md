@@ -5,8 +5,8 @@
 ## 測試前準備
 
 - [ ] Home Assistant 2026.1.0 以上，且已備份 automation。
-- [ ] Blueprint 標題顯示「AmazingTalker 多學員課程語音提醒 · v0.4.0」。
-- [ ] 第一個 section description 顯示「目前 Blueprint：v0.4.0」。
+- [ ] Blueprint 標題顯示「AmazingTalker 多學員課程語音提醒 · v0.4.1」。
+- [ ] 第一個 section description 顯示「目前 Blueprint：v0.4.1」。
 - [ ] 已建立測試 TTS；第一輪使用 Google Translate TTS。
 - [ ] 已選至少一台播放器；HomePod Mini 先確認 Apple TV 整合可播放一般媒體。
 - [ ] 「設定 → 系統 → 網路」本機 URL 可由播放器存取。
@@ -41,6 +41,7 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 Ca
 
 ## 早晨摘要
 
+- [ ] 「早晨開場語句」以原生 list-style 複選顯示五個完整播報句子，不再只顯示抽象名稱。
 - [ ] 只選 1 個早晨開場語句時，每次固定使用該句。
 - [ ] 選 3 個早晨開場語句時，每次實際播報只純 random 一個，連續相同視為正常。
 - [ ] 同一次早晨 playback 的所有學員共用一個 opening。
@@ -52,9 +53,11 @@ AmazingTalker 若不能建立任意暫時課程，可使用受控私人測試 Ca
 
 ## 60／30／10 分鐘與自訂提醒
 
+- [ ] 「課前提醒語句」以 Grace／30分鐘範例顯示五個完整句子，實播正確代入名稱與分鐘。
 - [ ] 只選 1 個課前提醒語句時，每次固定使用該句。
 - [ ] 選 3 個課前提醒語句時，每次實際播報只純 random 一個，連續相同視為正常。
 - [ ] 同一 heartbeat 有 30 與 10 分鐘兩句時，兩句使用相同 style。
+- [ ] 簡短提醒播報為「別忘了，30分鐘後有 Grace 的 AmazingTalker 課程。」且空格自然。
 - [ ] `spoken_name` 只代表 Calendar／帳號；播報不出現自動解析的老師名稱。
 - [ ] 建立至少 70 分鐘後課程，保持 refresh 60、offsets 30/10。
 - [ ] 60 分鐘處只刷新相關 calendar，不播放。
