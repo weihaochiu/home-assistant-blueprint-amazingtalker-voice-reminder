@@ -5,6 +5,8 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import importlib
+import json
 from pathlib import Path
 import re
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -134,8 +136,34 @@ def find_variable_template(value, name: str) -> str:
     raise KeyError(name)
 
 
+def find_top_action(blueprint: dict, alias: str) -> dict:
+    return next(action for action in blueprint["actions"] if action.get("alias") == alias)
+
+
+def find_variables_for_event(value, event: str) -> dict:
+    if isinstance(value, dict):
+        variables = value.get("variables")
+        if isinstance(variables, dict) and variables.get("diagnostic_event") == event:
+            return variables
+        for item in value.values():
+            try:
+                return find_variables_for_event(item, event)
+            except KeyError:
+                pass
+    elif isinstance(value, list):
+        for item in value:
+            try:
+                return find_variables_for_event(item, event)
+            except KeyError:
+                pass
+    raise KeyError(event)
+
+
 def render_native(template: str, context: dict | None = None, chooser=None):
     environment = NativeEnvironment(autoescape=False)
+    environment.filters["regex_search"] = lambda value, pattern: bool(
+        re.search(pattern, str(value))
+    )
     if chooser is not None:
         environment.filters["random"] = chooser
     return environment.from_string(template).render(context or {})
@@ -414,7 +442,7 @@ def player_plan(
 
 def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
     metadata = blueprint["blueprint"]
-    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒 · v0.4.1"
+    assert metadata["name"] == "AmazingTalker 多學員課程語音提醒 · v0.5.0"
     assert metadata["domain"] == "automation"
     assert metadata["author"] == "weihaochiu"
     assert metadata["source_url"] == SOURCE_URL
@@ -422,7 +450,7 @@ def test_yaml_loads_and_metadata_is_correct(blueprint: dict) -> None:
 
 
 def test_version_is_consistent_across_release_surfaces(blueprint: dict) -> None:
-    assert VERSION == "0.4.1"
+    assert VERSION == "0.5.0"
     displayed = f"v{VERSION}"
     metadata = blueprint["blueprint"]
     assert displayed in metadata["name"]
@@ -447,6 +475,359 @@ def test_required_and_optional_input_defaults(blueprint: dict) -> None:
     for key, definition in inputs.items():
         if key not in required:
             assert "default" in definition, f"optional input {key} needs a default"
+
+
+def test_v041_inputs_remain_compatible_and_diagnostics_are_additive(blueprint: dict) -> None:
+    inputs = flatten_inputs(blueprint["blueprint"]["input"])
+    v041_inputs = {
+        "learners",
+        "media_players",
+        "tts_entity",
+        "tts_language",
+        "announcement_volume",
+        "restore_original_volume",
+        "attempt_media_resume",
+        "enable_scheduled_update",
+        "update_frequency",
+        "enable_morning_summary",
+        "morning_summary_time",
+        "morning_intro_styles",
+        "enable_pre_class_reminders",
+        "pre_class_message_styles",
+        "reminder_offsets",
+        "enable_pre_class_refresh",
+        "pre_class_refresh_minutes",
+        "verify_before_each_reminder",
+    }
+    diagnostic_inputs = {
+        "enable_diagnostic_logging",
+        "diagnostic_log_level",
+        "diagnostic_log_retention_days",
+        "diagnostic_privacy_mode",
+    }
+    assert set(inputs) == v041_inputs | diagnostic_inputs
+    assert all("default" in inputs[key] for key in diagnostic_inputs)
+
+
+def test_diagnostic_input_defaults_and_selectors(blueprint: dict) -> None:
+    input_tree = blueprint["blueprint"]["input"]
+    section = input_tree["diagnostic_logging_section"]
+    assert section["name"] == "診斷紀錄與除錯"
+    assert section["icon"] == "mdi:file-document-alert"
+    assert section["collapsed"] is True
+
+    inputs = flatten_inputs(input_tree)
+    assert inputs["enable_diagnostic_logging"]["default"] is False
+    assert inputs["diagnostic_log_level"]["default"] == "normal"
+    assert inputs["diagnostic_privacy_mode"]["default"] == "safe"
+    retention = inputs["diagnostic_log_retention_days"]
+    assert retention["default"] == 7
+    assert retention["selector"]["number"] == {
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "mode": "box",
+    }
+    assert [
+        option["value"]
+        for option in inputs["diagnostic_log_level"]["selector"]["select"]["options"]
+    ] == ["normal", "debug"]
+    assert [
+        option["value"]
+        for option in inputs["diagnostic_privacy_mode"]["selector"]["select"]["options"]
+    ] == ["safe", "detailed"]
+
+
+def test_diagnostic_event_codes_and_schema_are_fixed(blueprint: dict) -> None:
+    expected = [
+        "AUTOMATION_START",
+        "SCHEDULED_REFRESH_START",
+        "SCHEDULED_REFRESH_RESULT",
+        "MORNING_QUERY_START",
+        "MORNING_QUERY_RESULT",
+        "MORNING_SUMMARY_CREATED",
+        "MORNING_SUMMARY_SKIPPED",
+        "HEARTBEAT_ACTIONABLE",
+        "CALENDAR_QUERY_START",
+        "CALENDAR_QUERY_RESULT",
+        "REFRESH_REQUIRED",
+        "CALENDAR_REFRESH_START",
+        "CALENDAR_REFRESH_RESULT",
+        "REMINDER_CANDIDATE",
+        "REMINDER_VERIFY_START",
+        "REMINDER_VERIFY_RESULT",
+        "REMINDER_CONFIRMED",
+        "REMINDER_SKIPPED",
+        "TTS_PREPARE",
+        "PLAYER_VOLUME_SET",
+        "PLAYER_PLAY_START",
+        "PLAYER_PLAY_RESULT",
+        "PLAYER_VOLUME_RESTORE",
+        "PLAYER_VOLUME_RESTORE_RESULT",
+        "AUTOMATION_COMPLETE",
+        "WARNING",
+        "ERROR",
+    ]
+    assert blueprint["variables"]["diagnostic_event_codes"] == expected
+
+    emitter = blueprint["actions"][0]
+    action = emitter["then"][0]
+    assert action["action"] == "system_log.write"
+    assert action["data"]["logger"] == (
+        "blueprints.weihaochiu.amazingtalker_voice_reminder"
+    )
+    assert action["data"]["level"] == "info"
+    message = action["data"]["message"]
+    for required in ("timestamp", "version", "run_id", "trigger", "level", "event", "result"):
+        assert f"'{required}'" in message
+    assert "| to_json" in message
+    assert action["continue_on_error"] is True
+
+
+def test_diagnostic_emitter_renders_one_valid_json_line(blueprint: dict) -> None:
+    message = blueprint["actions"][0]["then"][0]["data"]["message"]
+    environment = Environment(autoescape=False)
+    environment.filters["to_json"] = lambda value: json.dumps(
+        value, ensure_ascii=False, separators=(",", ":")
+    )
+    rendered = environment.from_string(message).render(
+        now=lambda: datetime(2026, 8, 21, 18, 30, tzinfo=timezone.utc),
+        diagnostic_run_id="20260821T183000000000-heartbeat",
+        diagnostic_trigger="heartbeat",
+        diagnostic_event_level="normal",
+        diagnostic_event="REMINDER_CANDIDATE",
+        diagnostic_result="candidate",
+        diagnostic_details={"calendar": "calendar.example", "remaining_minutes": 30},
+    )
+    assert "\n" not in rendered
+    payload = json.loads(rendered)
+    assert payload == {
+        "timestamp": "2026-08-21T18:30:00+00:00",
+        "version": "v0.5.0",
+        "run_id": "20260821T183000000000-heartbeat",
+        "trigger": "heartbeat",
+        "level": "normal",
+        "event": "REMINDER_CANDIDATE",
+        "result": "candidate",
+        "calendar": "calendar.example",
+        "remaining_minutes": 30,
+    }
+
+
+def test_diagnostic_emitter_respects_disabled_normal_and_debug_levels(
+    blueprint: dict,
+) -> None:
+    condition = blueprint["actions"][0]["if"][0]["value_template"]
+    base = {
+        "diagnostic_event": "CALENDAR_QUERY_RESULT",
+        "diagnostic_event_codes": blueprint["variables"]["diagnostic_event_codes"],
+        "diagnostic_emit": True,
+    }
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": False,
+            "diagnostic_event_level": "normal",
+            "diagnostic_level": "normal",
+        },
+    ) is False
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "normal",
+            "diagnostic_level": "normal",
+        },
+    ) is True
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "debug",
+            "diagnostic_level": "normal",
+        },
+    ) is False
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "debug",
+            "diagnostic_level": "debug",
+        },
+    ) is True
+
+
+def test_diagnostic_run_id_is_safe_and_correlates_one_run(blueprint: dict) -> None:
+    rendered = render_native(
+        blueprint["variables"]["diagnostic_run_id"],
+        {
+            "check_time": datetime(2026, 8, 21, 18, 30, tzinfo=timezone.utc).timestamp(),
+            "diagnostic_trigger": "heartbeat",
+            "as_datetime": lambda value: datetime.fromtimestamp(float(value), timezone.utc),
+            "as_local": lambda value: value,
+        },
+    )
+    assert rendered == "20260821T183000000000-heartbeat"
+    assert re.fullmatch(r"\d{8}T\d{12}-heartbeat", rendered)
+    next_run = render_native(
+        blueprint["variables"]["diagnostic_run_id"],
+        {
+            "check_time": datetime(2026, 8, 21, 18, 31, tzinfo=timezone.utc).timestamp(),
+            "diagnostic_trigger": "heartbeat",
+            "as_datetime": lambda value: datetime.fromtimestamp(float(value), timezone.utc),
+            "as_local": lambda value: value,
+        },
+    )
+    assert next_run != rendered
+
+
+def test_safe_privacy_omits_learner_and_summary_from_candidate_details(
+    blueprint: dict,
+) -> None:
+    variables = find_variables_for_event(blueprint["actions"], "REMINDER_CANDIDATE")
+    candidate = {
+        "calendar": "calendar.example",
+        "learner": "Private Learner",
+        "summary": "Private lesson summary",
+        "start_raw": "2026-08-21T19:00:00+08:00",
+        "end_raw": "2026-08-21T19:50:00+08:00",
+        "remaining": 30,
+    }
+    safe = render_native(
+        variables["diagnostic_details"],
+        {"repeat": {"item": candidate}, "diagnostic_privacy": "safe"},
+    )
+    assert safe == {
+        "calendar": "calendar.example",
+        "start": candidate["start_raw"],
+        "end": candidate["end_raw"],
+        "remaining_minutes": 30,
+    }
+    detailed = render_native(
+        variables["diagnostic_details"],
+        {
+            "repeat": {"item": candidate},
+            "diagnostic_privacy": "detailed",
+            "diagnostic_sensitive_pattern": blueprint["variables"][
+                "diagnostic_sensitive_pattern"
+            ],
+        },
+    )
+    assert detailed["learner"] == "Private Learner"
+    assert detailed["summary"] == "Private lesson summary"
+
+
+@pytest.mark.parametrize(
+    ("learner", "summary"),
+    [
+        ("https://private.example/calendar", "Ordinary lesson"),
+        ("Ordinary learner", "Authorization: Bearer private-value"),
+        ("Ordinary learner", "cookie=session-value"),
+        ("Ordinary learner", "password=private-value"),
+        ("Ordinary learner", "token=private-value"),
+    ],
+)
+def test_detailed_privacy_redacts_url_and_credential_markers(
+    blueprint: dict, learner: str, summary: str
+) -> None:
+    variables = find_variables_for_event(blueprint["actions"], "REMINDER_CANDIDATE")
+    candidate = {
+        "calendar": "calendar.example",
+        "learner": learner,
+        "summary": summary,
+        "start_raw": "2026-08-21T19:00:00+08:00",
+        "end_raw": "2026-08-21T19:50:00+08:00",
+        "remaining": 30,
+    }
+    detailed = render_native(
+        variables["diagnostic_details"],
+        {
+            "repeat": {"item": candidate},
+            "diagnostic_privacy": "detailed",
+            "diagnostic_sensitive_pattern": blueprint["variables"][
+                "diagnostic_sensitive_pattern"
+            ],
+        },
+    )
+    assert detailed["learner"] == (
+        "[redacted]" if learner != "Ordinary learner" else learner
+    )
+    assert detailed["summary"] == (
+        "[redacted]" if summary != "Ordinary lesson" else summary
+    )
+
+
+def test_diagnostic_templates_never_serialize_urls_or_credentials(blueprint: dict) -> None:
+    diagnostic_templates = []
+    for value in walk(blueprint["actions"]):
+        if isinstance(value, dict):
+            variables = value.get("variables")
+            if isinstance(variables, dict) and "diagnostic_details" in variables:
+                diagnostic_templates.append(str(variables["diagnostic_details"]))
+    diagnostic_templates.append(str(blueprint["actions"][0]["then"][0]["data"]["message"]))
+    combined = "\n".join(diagnostic_templates).lower()
+    for forbidden in (
+        "http://",
+        "https://",
+        "token=",
+        "authorization",
+        "cookie",
+        "api_key",
+        "password",
+        "calendar_url",
+    ):
+        assert forbidden not in combined
+
+
+def test_empty_heartbeat_emits_no_diagnostic_event_even_in_debug(blueprint: dict) -> None:
+    choose_action = next(action for action in blueprint["actions"] if "choose" in action)
+    heartbeat_sequence = choose_action["choose"][1]["sequence"]
+    header = find_variables_for_event(heartbeat_sequence, "AUTOMATION_START")
+    query_result = find_variables_for_event(heartbeat_sequence, "CALENDAR_QUERY_RESULT")
+    empty = {
+        "refresh_calendars": [],
+        "cached_events": [],
+        "diagnostic_level": "debug",
+        "heartbeat_agenda": {},
+        "heartbeat_query_failed": False,
+    }
+    assert render_native(header["diagnostic_emit"], empty) is False
+    assert render_native(query_result["diagnostic_emit"], empty) is False
+
+    actionable = {**empty, "cached_events": [{"calendar": "calendar.example"}]}
+    assert render_native(header["diagnostic_emit"], actionable) is True
+    assert render_native(query_result["diagnostic_emit"], actionable) is True
+
+    failed = {**empty, "heartbeat_query_failed": True}
+    assert render_native(query_result["diagnostic_emit"], failed) is True
+
+    scheduled_already_started = {
+        **actionable,
+        "diagnostic_header_emitted": True,
+    }
+    assert render_native(header["diagnostic_emit"], scheduled_already_started) is False
+
+
+def test_all_system_log_actions_use_one_logger_and_nonblocking_warnings(
+    blueprint: dict,
+) -> None:
+    system_log_actions = [
+        value
+        for value in walk(blueprint["actions"])
+        if isinstance(value, dict) and value.get("action") == "system_log.write"
+    ]
+    assert len(system_log_actions) >= 5
+    for action in system_log_actions:
+        assert action["data"]["logger"] == (
+            "blueprints.weihaochiu.amazingtalker_voice_reminder"
+        )
+        assert action["continue_on_error"] is True
+        if action["data"]["level"] in {"warning", "error"}:
+            assert "[run_id={{ diagnostic_run_id }}]" in action["data"]["message"]
 
 
 def test_repeatable_learner_object_schema(blueprint: dict) -> None:
@@ -604,9 +985,9 @@ def test_modern_automation_syntax_and_heartbeat(blueprint: dict, blueprint_text:
 def test_scheduled_refresh_is_independent_from_reminder_heartbeat(
     blueprint: dict, blueprint_text: str
 ) -> None:
-    scheduled_if = blueprint["actions"][0]
-    legacy_warning_if = blueprint["actions"][1]
-    reminder_choose = blueprint["actions"][2]
+    scheduled_if = find_top_action(blueprint, "符合排程時定期強制更新")
+    legacy_warning_if = find_top_action(blueprint, "舊 scalar 排程每日遷移警告")
+    reminder_choose = next(action for action in blueprint["actions"] if "choose" in action)
     assert "if" in scheduled_if and "then" in scheduled_if
     assert "if" in legacy_warning_if and "then" in legacy_warning_if
     assert "choose" in reminder_choose
@@ -671,9 +1052,11 @@ def render_blueprint_schedule(blueprint: dict, schedule, moment: datetime) -> tu
         "schedule_time",
         "schedule_weekdays",
         "schedule_month_days",
+        "scheduled_update_due",
     ):
         context[name] = environment.from_string(variables[name]).render(context)
-    due_template = blueprint["actions"][0]["if"][2]["value_template"]
+    scheduled = find_top_action(blueprint, "符合排程時定期強制更新")
+    due_template = scheduled["if"][2]["value_template"]
     due = environment.from_string(due_template).render(context)
     assert isinstance(due, bool), f"scheduled due template must render a native bool, got {due!r}"
     return context, due
@@ -891,20 +1274,20 @@ def test_nonlegacy_schedule_values_do_not_raise_migration_warning(
 def test_legacy_warning_is_rate_limited_and_nonblocking(
     blueprint: dict, blueprint_text: str
 ) -> None:
-    warning_if = blueprint["actions"][1]
+    warning_if = find_top_action(blueprint, "舊 scalar 排程每日遷移警告")
     conditions = warning_if["if"]
     assert conditions[0] == {"condition": "trigger", "id": "heartbeat"}
     assert "enable_scheduled_update_input" in conditions[1]["value_template"]
     assert "legacy_schedule_detected" in conditions[2]["value_template"]
     assert "strftime('%H:%M') == '00:00'" in conditions[3]["value_template"]
-    warning_action = warning_if["then"][0]
+    warning_action = next(item for item in warning_if["then"] if "action" in item)
     assert warning_action["action"] == "system_log.write"
     assert warning_action["data"]["level"] == "warning"
     assert warning_action["data"]["logger"] == (
         "blueprints.weihaochiu.amazingtalker_voice_reminder"
     )
     assert warning_action["continue_on_error"] is True
-    assert blueprint["actions"][2].get("choose")
+    assert any(action.get("choose") for action in blueprint["actions"])
     assert blueprint_text.count("legacy scheduled-refresh") == 1
     midnight_template = conditions[3]["value_template"]
     base_context = {
@@ -1189,7 +1572,8 @@ def test_morning_no_course_does_not_create_an_opening_or_reach_playback(
 
     assert render_actual_morning_message(blueprint, ["morning_standard"], [], chooser=chooser) == ""
     assert calls == []
-    morning_sequence = blueprint["actions"][2]["choose"][0]["sequence"]
+    choose_action = next(action for action in blueprint["actions"] if "choose" in action)
+    morning_sequence = choose_action["choose"][0]["sequence"]
     no_course_index = next(
         index
         for index, action in enumerate(morning_sequence)
@@ -1452,6 +1836,78 @@ def test_readmes_remove_legacy_schedule_input_rows() -> None:
         assert "| `update_weekday`" not in text
         assert "| `update_month_day`" not in text
         assert "legacy_scheduled_update_section" not in text
+
+
+def test_diagnostic_documentation_states_real_retention_limit() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README.zh-TW.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs" / "DIAGNOSTIC_LOGGING.md").read_text(encoding="utf-8")
+    assert "metadata hint only" in english
+    assert "不會" in chinese and "rotate" in chinese
+    assert "目前沒有真正的自動 N-day retention" in guide
+    assert "File integration" in guide
+    assert "Recorder" in guide
+    assert "shell_command" in guide
+    assert "pure Blueprint has no filesystem API" in english
+
+
+def test_diagnostic_jsonl_example_is_valid_fake_safe_data() -> None:
+    path = ROOT / "docs" / "examples" / "diagnostic-log-example.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert 5 <= len(lines) <= 10
+    run_ids = set()
+    for line in lines:
+        payload = json.loads(line)
+        assert {"timestamp", "version", "run_id", "trigger", "level", "event", "result"} <= payload.keys()
+        assert payload["version"] == "v0.5.0"
+        run_ids.add(payload["run_id"])
+    assert len(run_ids) == 1
+    combined = "\n".join(lines).lower()
+    for forbidden in ("http://", "https://", "token=", "authorization", "cookie", "password"):
+        assert forbidden not in combined
+
+
+def test_backup_zip_manifest_exclusions_verification_and_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup_module = importlib.import_module("scripts.create_backup")
+    monkeypatch.setattr(backup_module, "ROOT", tmp_path)
+    monkeypatch.setattr(backup_module, "BACKUP_DIR", tmp_path / "BACKUP")
+    monkeypatch.setattr(
+        backup_module,
+        "git",
+        lambda *args: {
+            ("branch", "--show-current"): "main",
+            ("rev-parse", "HEAD"): "0123456789abcdef0123456789abcdef01234567",
+            ("status", "--short"): "clean",
+        }[args],
+    )
+    (tmp_path / "source.txt").write_text("source", encoding="utf-8")
+    for excluded in (".git", "BACKUP", ".venv", "venv", "__pycache__", ".pytest_cache"):
+        directory = tmp_path / excluded
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "secret.txt").write_text("excluded", encoding="utf-8")
+    (tmp_path / "ignored.pyc").write_bytes(b"excluded")
+
+    created = [backup_module.create_backup() for _ in range(12)]
+    backups = sorted((tmp_path / "BACKUP").glob("*.zip"))
+    assert len({path.name for path in created}) == 12
+    assert len(backups) == backup_module.KEEP_LATEST == 10
+
+    import zipfile
+
+    with zipfile.ZipFile(backups[-1]) as archive:
+        assert archive.testzip() is None
+        names = archive.namelist()
+        assert "source.txt" in names
+        assert "BACKUP_MANIFEST.txt" in names
+        assert all("secret.txt" not in name for name in names)
+        assert all(not name.endswith(".pyc") for name in names)
+        manifest = archive.read("BACKUP_MANIFEST.txt").decode("utf-8")
+        assert "repository:" in manifest
+        assert "branch: main" in manifest
+        assert "HEAD SHA: 0123456789abcdef" in manifest
+        assert "git status:" in manifest
 
 
 def test_all_repository_text_is_utf8_without_bom() -> None:
