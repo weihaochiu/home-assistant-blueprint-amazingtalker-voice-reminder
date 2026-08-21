@@ -43,7 +43,7 @@ Home Assistant 的 condensed log 主要保留近期 warning/error；一般 diagn
 
 `safe` 不包含學員播報名稱、event summary 或完整 TTS message。
 
-`detailed` 可額外包含學員播報名稱與 event summary。它仍不會記錄完整 TTS message。
+`detailed` 可額外包含學員播報名稱與 event summary。任一欄位若含 URL 或常見 credential 標記，整個欄位會替換成 `[redacted]`。它仍不會記錄完整 TTS message。
 
 兩種模式都永遠禁止：
 

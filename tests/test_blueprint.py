@@ -5,6 +5,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import importlib
 import json
 from pathlib import Path
 import re
@@ -160,6 +161,9 @@ def find_variables_for_event(value, event: str) -> dict:
 
 def render_native(template: str, context: dict | None = None, chooser=None):
     environment = NativeEnvironment(autoescape=False)
+    environment.filters["regex_search"] = lambda value, pattern: bool(
+        re.search(pattern, str(value))
+    )
     if chooser is not None:
         environment.filters["random"] = chooser
     return environment.from_string(template).render(context or {})
@@ -473,6 +477,38 @@ def test_required_and_optional_input_defaults(blueprint: dict) -> None:
             assert "default" in definition, f"optional input {key} needs a default"
 
 
+def test_v041_inputs_remain_compatible_and_diagnostics_are_additive(blueprint: dict) -> None:
+    inputs = flatten_inputs(blueprint["blueprint"]["input"])
+    v041_inputs = {
+        "learners",
+        "media_players",
+        "tts_entity",
+        "tts_language",
+        "announcement_volume",
+        "restore_original_volume",
+        "attempt_media_resume",
+        "enable_scheduled_update",
+        "update_frequency",
+        "enable_morning_summary",
+        "morning_summary_time",
+        "morning_intro_styles",
+        "enable_pre_class_reminders",
+        "pre_class_message_styles",
+        "reminder_offsets",
+        "enable_pre_class_refresh",
+        "pre_class_refresh_minutes",
+        "verify_before_each_reminder",
+    }
+    diagnostic_inputs = {
+        "enable_diagnostic_logging",
+        "diagnostic_log_level",
+        "diagnostic_log_retention_days",
+        "diagnostic_privacy_mode",
+    }
+    assert set(inputs) == v041_inputs | diagnostic_inputs
+    assert all("default" in inputs[key] for key in diagnostic_inputs)
+
+
 def test_diagnostic_input_defaults_and_selectors(blueprint: dict) -> None:
     input_tree = blueprint["blueprint"]["input"]
     section = input_tree["diagnostic_logging_section"]
@@ -578,6 +614,53 @@ def test_diagnostic_emitter_renders_one_valid_json_line(blueprint: dict) -> None
     }
 
 
+def test_diagnostic_emitter_respects_disabled_normal_and_debug_levels(
+    blueprint: dict,
+) -> None:
+    condition = blueprint["actions"][0]["if"][0]["value_template"]
+    base = {
+        "diagnostic_event": "CALENDAR_QUERY_RESULT",
+        "diagnostic_event_codes": blueprint["variables"]["diagnostic_event_codes"],
+        "diagnostic_emit": True,
+    }
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": False,
+            "diagnostic_event_level": "normal",
+            "diagnostic_level": "normal",
+        },
+    ) is False
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "normal",
+            "diagnostic_level": "normal",
+        },
+    ) is True
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "debug",
+            "diagnostic_level": "normal",
+        },
+    ) is False
+    assert render_native(
+        condition,
+        {
+            **base,
+            "enable_diagnostic_logging_input": True,
+            "diagnostic_event_level": "debug",
+            "diagnostic_level": "debug",
+        },
+    ) is True
+
+
 def test_diagnostic_run_id_is_safe_and_correlates_one_run(blueprint: dict) -> None:
     rendered = render_native(
         blueprint["variables"]["diagnostic_run_id"],
@@ -590,6 +673,16 @@ def test_diagnostic_run_id_is_safe_and_correlates_one_run(blueprint: dict) -> No
     )
     assert rendered == "20260821T183000000000-heartbeat"
     assert re.fullmatch(r"\d{8}T\d{12}-heartbeat", rendered)
+    next_run = render_native(
+        blueprint["variables"]["diagnostic_run_id"],
+        {
+            "check_time": datetime(2026, 8, 21, 18, 31, tzinfo=timezone.utc).timestamp(),
+            "diagnostic_trigger": "heartbeat",
+            "as_datetime": lambda value: datetime.fromtimestamp(float(value), timezone.utc),
+            "as_local": lambda value: value,
+        },
+    )
+    assert next_run != rendered
 
 
 def test_safe_privacy_omits_learner_and_summary_from_candidate_details(
@@ -616,10 +709,56 @@ def test_safe_privacy_omits_learner_and_summary_from_candidate_details(
     }
     detailed = render_native(
         variables["diagnostic_details"],
-        {"repeat": {"item": candidate}, "diagnostic_privacy": "detailed"},
+        {
+            "repeat": {"item": candidate},
+            "diagnostic_privacy": "detailed",
+            "diagnostic_sensitive_pattern": blueprint["variables"][
+                "diagnostic_sensitive_pattern"
+            ],
+        },
     )
     assert detailed["learner"] == "Private Learner"
     assert detailed["summary"] == "Private lesson summary"
+
+
+@pytest.mark.parametrize(
+    ("learner", "summary"),
+    [
+        ("https://private.example/calendar", "Ordinary lesson"),
+        ("Ordinary learner", "Authorization: Bearer private-value"),
+        ("Ordinary learner", "cookie=session-value"),
+        ("Ordinary learner", "password=private-value"),
+        ("Ordinary learner", "token=private-value"),
+    ],
+)
+def test_detailed_privacy_redacts_url_and_credential_markers(
+    blueprint: dict, learner: str, summary: str
+) -> None:
+    variables = find_variables_for_event(blueprint["actions"], "REMINDER_CANDIDATE")
+    candidate = {
+        "calendar": "calendar.example",
+        "learner": learner,
+        "summary": summary,
+        "start_raw": "2026-08-21T19:00:00+08:00",
+        "end_raw": "2026-08-21T19:50:00+08:00",
+        "remaining": 30,
+    }
+    detailed = render_native(
+        variables["diagnostic_details"],
+        {
+            "repeat": {"item": candidate},
+            "diagnostic_privacy": "detailed",
+            "diagnostic_sensitive_pattern": blueprint["variables"][
+                "diagnostic_sensitive_pattern"
+            ],
+        },
+    )
+    assert detailed["learner"] == (
+        "[redacted]" if learner != "Ordinary learner" else learner
+    )
+    assert detailed["summary"] == (
+        "[redacted]" if summary != "Ordinary lesson" else summary
+    )
 
 
 def test_diagnostic_templates_never_serialize_urls_or_credentials(blueprint: dict) -> None:
@@ -665,6 +804,12 @@ def test_empty_heartbeat_emits_no_diagnostic_event_even_in_debug(blueprint: dict
 
     failed = {**empty, "heartbeat_query_failed": True}
     assert render_native(query_result["diagnostic_emit"], failed) is True
+
+    scheduled_already_started = {
+        **actionable,
+        "diagnostic_header_emitted": True,
+    }
+    assert render_native(header["diagnostic_emit"], scheduled_already_started) is False
 
 
 def test_all_system_log_actions_use_one_logger_and_nonblocking_warnings(
@@ -1720,6 +1865,49 @@ def test_diagnostic_jsonl_example_is_valid_fake_safe_data() -> None:
     combined = "\n".join(lines).lower()
     for forbidden in ("http://", "https://", "token=", "authorization", "cookie", "password"):
         assert forbidden not in combined
+
+
+def test_backup_zip_manifest_exclusions_verification_and_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup_module = importlib.import_module("scripts.create_backup")
+    monkeypatch.setattr(backup_module, "ROOT", tmp_path)
+    monkeypatch.setattr(backup_module, "BACKUP_DIR", tmp_path / "BACKUP")
+    monkeypatch.setattr(
+        backup_module,
+        "git",
+        lambda *args: {
+            ("branch", "--show-current"): "main",
+            ("rev-parse", "HEAD"): "0123456789abcdef0123456789abcdef01234567",
+            ("status", "--short"): "clean",
+        }[args],
+    )
+    (tmp_path / "source.txt").write_text("source", encoding="utf-8")
+    for excluded in (".git", "BACKUP", ".venv", "venv", "__pycache__", ".pytest_cache"):
+        directory = tmp_path / excluded
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "secret.txt").write_text("excluded", encoding="utf-8")
+    (tmp_path / "ignored.pyc").write_bytes(b"excluded")
+
+    created = [backup_module.create_backup() for _ in range(12)]
+    backups = sorted((tmp_path / "BACKUP").glob("*.zip"))
+    assert len({path.name for path in created}) == 12
+    assert len(backups) == backup_module.KEEP_LATEST == 10
+
+    import zipfile
+
+    with zipfile.ZipFile(backups[-1]) as archive:
+        assert archive.testzip() is None
+        names = archive.namelist()
+        assert "source.txt" in names
+        assert "BACKUP_MANIFEST.txt" in names
+        assert all("secret.txt" not in name for name in names)
+        assert all(not name.endswith(".pyc") for name in names)
+        manifest = archive.read("BACKUP_MANIFEST.txt").decode("utf-8")
+        assert "repository:" in manifest
+        assert "branch: main" in manifest
+        assert "HEAD SHA: 0123456789abcdef" in manifest
+        assert "git status:" in manifest
 
 
 def test_all_repository_text_is_utf8_without_bom() -> None:

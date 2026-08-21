@@ -380,7 +380,7 @@ Remote Calendar 內部保有 UID，但官方 `calendar.get_events` 目前不回�
 
 每筆紀錄是 Home Assistant raw system log 中的一行 JSON，logger 固定為 `blueprints.weihaochiu.amazingtalker_voice_reminder`。`20260821T183000000000-heartbeat` 形式的 run ID 可串起同次 scheduled refresh、快取 query、指定刷新、verification、TTS、逐台播放與音量恢復。官方 action 沒有 success response 時只記 `action_dispatched` 或 `unknown`；程式繼續執行不會被當成成功證據。
 
-`safe` 只含 entity ID、計數、時間、剩餘分鐘、可觀察 refresh/player state 與結果，不含學員名稱或 event summary。`detailed` 可增加這兩項，但仍永遠不會序列化 Remote Calendar URL、token、authorization、cookie、password 或 integration config。兩種模式都不記完整 TTS 文字。
+`safe` 只含 entity ID、計數、時間、剩餘分鐘、可觀察 refresh/player state 與結果，不含學員名稱或 event summary。`detailed` 可增加這兩項，但任一欄位若含 URL 或常見 credential 標記就會整欄替換成 `[redacted]`。Blueprint 不讀取 Remote Calendar integration config；兩種模式都不記完整 TTS 文字。
 
 到「**設定 → 系統 → 紀錄**」查看 full raw log，搜尋固定 logger 或 run ID；condensed view 主要只保留近期 warning/error。Safe mode 的設計可直接交給 ChatGPT/Codex 分析，但分享前仍建議人工快速確認；Detailed mode 分享前必須人工檢查。
 

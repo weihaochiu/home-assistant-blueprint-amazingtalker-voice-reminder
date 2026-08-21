@@ -449,6 +449,10 @@ variables:
   diagnostic_privacy: >-
     {{ diagnostic_privacy_mode_input
        if diagnostic_privacy_mode_input in ['safe', 'detailed'] else 'safe' }}
+  diagnostic_sensitive_pattern: >-
+    (?ix)(?:[a-z][a-z0-9+.-]*://|www\.|api\.amazingtalker\.com/|
+    authorization|cookie|password|passwd|credential|token|api[_ -]?key|
+    client[_ -]?secret|bearer\s+)
   diagnostic_event_codes:
     - AUTOMATION_START
     - SCHEDULED_REFRESH_START
@@ -682,6 +686,7 @@ actions:
     then:
       - variables:
           diagnostic_flow_started: true
+          diagnostic_header_emitted: true
           scheduled_unavailable_calendars: >-
             {% set ns = namespace(items=[]) %}
             {% for entity in calendar_entities
@@ -1288,20 +1293,23 @@ actions:
                 {{ ns.items }}
               heartbeat_query_failed: "{{ heartbeat_agenda is not defined }}"
               diagnostic_flow_started: >-
-                {{ refresh_calendars | count > 0
+                {{ diagnostic_flow_started | default(false)
+                   or refresh_calendars | count > 0
                    or heartbeat_agenda is not defined
                    or (diagnostic_level == 'debug' and cached_events | count > 0) }}
               diagnostic_header_emitted: >-
-                {{ refresh_calendars | count > 0
+                {{ diagnostic_header_emitted | default(false)
+                   or refresh_calendars | count > 0
                    or heartbeat_agenda is not defined
                    or (diagnostic_level == 'debug' and cached_events | count > 0) }}
               diagnostic_event: AUTOMATION_START
               diagnostic_result: started
               diagnostic_event_level: normal
               diagnostic_emit: >-
-                {{ refresh_calendars | count > 0
-                   or heartbeat_agenda is not defined
-                   or (diagnostic_level == 'debug' and cached_events | count > 0) }}
+                {{ not (diagnostic_header_emitted | default(false))
+                   and (refresh_calendars | count > 0
+                     or heartbeat_agenda is not defined
+                     or (diagnostic_level == 'debug' and cached_events | count > 0)) }}
               diagnostic_details: >-
                 {{ {
                   'timezone': now().tzinfo | string,
@@ -1579,8 +1587,14 @@ actions:
                         'remaining_minutes': repeat.item.remaining
                       } -%}
                       {{- dict(base,
-                        learner=repeat.item.learner,
-                        summary=repeat.item.summary)
+                        learner='[redacted]'
+                          if repeat.item.learner | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.learner,
+                        summary='[redacted]'
+                          if repeat.item.summary | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.summary)
                         if diagnostic_privacy == 'detailed' else base -}}
                 - *emit_diagnostic
           - alias: 每段實際提醒前逐一最後更新；同一行事曆在本 heartbeat 去重
@@ -1745,8 +1759,14 @@ actions:
                         'reason': none if candidate_confirmed else candidate_reason
                       } -%}
                       {{- dict(base,
-                        learner=repeat.item.learner,
-                        summary=repeat.item.summary)
+                        learner='[redacted]'
+                          if repeat.item.learner | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.learner,
+                        summary='[redacted]'
+                          if repeat.item.summary | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.summary)
                         if diagnostic_privacy == 'detailed' else base -}}
                 - *emit_diagnostic
                 - variables:
@@ -1764,8 +1784,14 @@ actions:
                         'reason': none if candidate_confirmed else candidate_reason
                       } -%}
                       {{- dict(base,
-                        learner=repeat.item.learner,
-                        summary=repeat.item.summary)
+                        learner='[redacted]'
+                          if repeat.item.learner | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.learner,
+                        summary='[redacted]'
+                          if repeat.item.summary | string
+                            | regex_search(diagnostic_sensitive_pattern)
+                          else repeat.item.summary)
                         if diagnostic_privacy == 'detailed' else base -}}
                 - *emit_diagnostic
           - variables:

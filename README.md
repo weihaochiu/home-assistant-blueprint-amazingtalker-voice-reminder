@@ -379,7 +379,7 @@ Diagnostics are off by default. To troubleshoot, open **Settings → Automations
 
 Every entry is one JSON object in the Home Assistant raw system log under logger `blueprints.weihaochiu.amazingtalker_voice_reminder`. A run ID such as `20260821T183000000000-heartbeat` correlates scheduled refresh, cached query, targeted refresh, verification, TTS, player, and restore steps from one execution. Actions without an official success response use `action_dispatched` or `unknown`; continuing after an action is never reported as proof of success.
 
-`safe` mode includes entity IDs, counts, times, remaining minutes, observable refresh/player state, and results. It omits learner names and event summaries. `detailed` may add those two fields, but still never serializes a Remote Calendar URL, token, authorization data, cookie, password, or integration config. Full TTS text is not logged in either mode.
+`safe` mode includes entity IDs, counts, times, remaining minutes, observable refresh/player state, and results. It omits learner names and event summaries. `detailed` may add those two fields, but replaces either field with `[redacted]` when it contains a URL or common credential marker. It never reads Remote Calendar integration config, and neither mode logs full TTS text.
 
 Open **Settings → System → Logs** and use the full raw log to find the logger or run ID; the condensed view primarily retains recent warnings/errors. Safe-mode entries are designed for sharing with ChatGPT/Codex, although a final human review is still prudent. Review detailed-mode output manually before sharing.
 

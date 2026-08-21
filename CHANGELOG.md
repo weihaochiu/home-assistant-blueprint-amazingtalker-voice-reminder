@@ -11,15 +11,18 @@ All notable changes to this project are documented here.
 - Added a retention hint input with an explicit pure-Blueprint limitation: Home Assistant system-log or file rotation and cleanup remain installation-managed.
 - Added privacy, schema, defaults, and empty-heartbeat noise regression tests.
 - Added a Traditional Chinese diagnostic logging guide and synthetic JSONL example.
+- Added the workspace-standard verified pre-push source backup with latest-10 retention.
 
 ### Changed
 
 - Standardized existing warning logger names and added run/event correlation without making diagnostic logging mandatory.
 - Kept action outcomes conservative: services without observable success responses are recorded as `action_dispatched`, not `success`.
+- Kept one diagnostic flow header when scheduled refresh and reminder work share the same execution.
 
 ### Security
 
 - Diagnostic payloads serialize only explicitly allowlisted fields. Safe mode omits learner names and event summaries; all modes exclude private Calendar URLs and credentials by design.
+- Detailed-mode learner and summary fields are replaced with `[redacted]` when they contain URL or common credential markers.
 
 ## v0.4.1 - 2026-08-21
 
